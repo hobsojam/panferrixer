@@ -1,8 +1,23 @@
-/** Maps the keyboard to the single steering axis the flight uses. Keyboard only. */
+import type { Action } from "./dashboard";
+
+const ACTION_KEYS: Record<string, Action> = {
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  Enter: "activate",
+  Space: "activate",
+};
+
+/**
+ * Keyboard only. Two kinds of input:
+ * - held left/right, the steering axis used in flight
+ * - discrete presses, queued as actions for the dashboard and result screens
+ */
 export class InputController {
   private leftDown = false;
   private rightDown = false;
-  private restartRequested = false;
+  private queued: Action[] = [];
 
   constructor() {
     window.addEventListener("keydown", this.onKeyDown);
@@ -13,12 +28,11 @@ export class InputController {
     return (this.rightDown ? 1 : 0) - (this.leftDown ? 1 : 0);
   }
 
-  consumeRestart(): boolean {
-    if (this.restartRequested) {
-      this.restartRequested = false;
-      return true;
-    }
-    return false;
+  /** Returns and clears the presses made since the last call, in order. */
+  consumeActions(): Action[] {
+    const actions = this.queued;
+    this.queued = [];
+    return actions;
   }
 
   dispose(): void {
@@ -29,7 +43,10 @@ export class InputController {
   private onKeyDown = (e: KeyboardEvent): void => {
     if (e.code === "ArrowLeft") this.leftDown = true;
     if (e.code === "ArrowRight") this.rightDown = true;
-    if (e.code === "Enter" || e.code === "Space") this.restartRequested = true;
+
+    const action = ACTION_KEYS[e.code];
+    // Holding a key should not spam the dashboard; only fresh presses count.
+    if (action && !e.repeat) this.queued.push(action);
   };
 
   private onKeyUp = (e: KeyboardEvent): void => {

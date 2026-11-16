@@ -17,7 +17,7 @@ Then open the URL it prints.
 
 ## Controls
 
-Left and right arrow keys. Space launches a new missile once a flight has ended.
+Arrow keys move the selection on the dashboard. Space or Enter activates it. Left and right steer during a flight. After a flight ends, Space returns to the dashboard.
 
 ## How it works
 

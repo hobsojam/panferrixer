@@ -51,7 +51,7 @@ export function render(ctx: CanvasRenderingContext2D, state: FlightState, cfg: C
   drawFrame(ctx, cfg);
 
   if (state.phase === "hit" || state.phase === "crash" || state.phase === "miss") {
-    drawText(ctx, "PRESS SPACE TO LAUNCH AGAIN", w / 2, h - 36, 18, cfg.colors.text, 1);
+    drawText(ctx, "PRESS SPACE TO RETURN TO DASHBOARD", w / 2, h - 36, 18, cfg.colors.text, 1);
   }
 }
 
@@ -262,7 +262,7 @@ function drawText(
   ctx.globalAlpha = 1;
 }
 
-function drawGlow(ctx: CanvasRenderingContext2D, color: string, blur: number, draw: () => void): void {
+export function drawGlow(ctx: CanvasRenderingContext2D, color: string, blur: number, draw: () => void): void {
   ctx.save();
   ctx.shadowColor = color;
   ctx.shadowBlur = blur;
