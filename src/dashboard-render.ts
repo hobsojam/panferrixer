@@ -1,6 +1,7 @@
 import type { Config } from "./config";
 import { AVAILABLE_VERBS, VERB_GRID, isLow, selectedVerb, type DashboardState, type Verb } from "./dashboard";
 import { drawGlow } from "./render";
+import { NETWORK } from "./map";
 
 const VERB_LABELS: Record<Verb, string> = {
   move: "MOVE",
@@ -105,26 +106,92 @@ function drawDetailPanel(ctx: CanvasRenderingContext2D, state: DashboardState, c
   const c = cfg.colors;
   const x = 700;
   const width = 240;
+  const height = PANEL_BOTTOM - PANEL_TOP;
   const verb = selectedVerb(state);
   const available = AVAILABLE_VERBS.includes(verb);
 
-  drawPanelFrame(ctx, x, PANEL_TOP, width, PANEL_BOTTOM - PANEL_TOP, c.panelDim);
-  drawText(ctx, "SELECTED", x + 14, PANEL_TOP + 22, 12, c.text, 0.7, "monospace", "left");
-  drawText(ctx, VERB_LABELS[verb], x + 14, PANEL_TOP + 52, 20, c.panelSelected, 1, "monospace", "left");
+  drawPanelFrame(ctx, x, PANEL_TOP, width, height, c.panelDim);
+  drawMiniMap(ctx, state, cfg, x + 8, PANEL_TOP + 8, width - 16, 118);
+
+  ctx.strokeStyle = c.panelDim;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + 8, PANEL_TOP + 140);
+  ctx.lineTo(x + width - 8, PANEL_TOP + 140);
+  ctx.stroke();
+
+  drawText(ctx, "SELECTED", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
+  drawText(ctx, VERB_LABELS[verb], x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
   drawText(
     ctx,
     available ? "READY" : "NOT YET BUILT",
     x + 14,
-    PANEL_TOP + 90,
-    14,
+    PANEL_TOP + 204,
+    13,
     available ? c.energy : c.panelDim,
     1,
     "monospace",
     "left"
   );
   if (available) {
-    drawText(ctx, "SPACE TO FIRE", x + 14, PANEL_TOP + 116, 12, c.text, 0.7, "monospace", "left");
+    drawText(ctx, "SPACE TO FIRE", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
   }
+}
+
+/**
+ * The network graph: passes as lines, nodes as dots, and the robot's node marked
+ * with a pulsing ring. Pure: the map layout comes from map.ts, the position from state.
+ */
+function drawMiniMap(
+  ctx: CanvasRenderingContext2D,
+  state: DashboardState,
+  cfg: Config,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): void {
+  const c = cfg.colors;
+  const pad = 14;
+  const toX = (nx: number): number => x + pad + nx * (w - 2 * pad);
+  const toY = (ny: number): number => y + pad + ny * (h - 2 * pad);
+
+  ctx.strokeStyle = c.panelDim;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const [a, b] of NETWORK.links) {
+    ctx.moveTo(toX(NETWORK.nodes[a].x), toY(NETWORK.nodes[a].y));
+    ctx.lineTo(toX(NETWORK.nodes[b].x), toY(NETWORK.nodes[b].y));
+  }
+  ctx.stroke();
+
+  ctx.fillStyle = c.text;
+  NETWORK.nodes.forEach((node, index) => {
+    if (index === state.location) return;
+    ctx.globalAlpha = 0.5;
+    ctx.beginPath();
+    ctx.arc(toX(node.x), toY(node.y), 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  const here = NETWORK.nodes[state.location];
+  const cx = toX(here.x);
+  const cy = toY(here.y);
+  const pulse = 1.5 * Math.sin(state.time * 4);
+  drawGlow(ctx, c.panelSelected, 6, () => {
+    ctx.strokeStyle = c.panelSelected;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 6 + pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = c.panelSelected;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  drawText(ctx, "NETWORK", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
 }
 
 /**

@@ -107,6 +107,7 @@ export const config = {
     lowThreshold: 2, // at or below this many cells or plates, the last one flashes and the trace agitates
     tracePoints: 120,
     formName: "PROTOTYPE", // placeholder for the robot form shown in the name bar
+    startNode: 0, // index into the network map where the robot begins
   },
 
   colors: {

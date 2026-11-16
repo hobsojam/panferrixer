@@ -19,6 +19,7 @@ export interface DashboardState {
   energyCells: number;
   shieldPlates: number;
   time: number; // seconds on the dashboard; drives the state-of-mind trace
+  location: number; // index of the network node the robot is at
 }
 
 export interface DashboardStep {
@@ -33,6 +34,7 @@ export function createDashboardState(cfg: Config): DashboardState {
     energyCells: cfg.dashboard.energyCells,
     shieldPlates: cfg.dashboard.shieldPlates,
     time: 0,
+    location: cfg.dashboard.startNode,
   };
 }
 
