@@ -1,8 +1,9 @@
+import { createAppState, updateApp, type AppState } from "./app";
 import { config } from "./config";
-import { createInitialState, updateFlight } from "./flight";
+import type { Action } from "./dashboard";
+import { renderDashboard } from "./dashboard-render";
 import { InputController } from "./input";
 import { render } from "./render";
-import type { FlightState } from "./types";
 
 const canvas = document.getElementById("flight-canvas") as HTMLCanvasElement;
 canvas.width = config.canvas.width;
@@ -16,27 +17,30 @@ function newSeed(): number {
   return Math.floor(Math.random() * 0xffffffff);
 }
 
-let state: FlightState = createInitialState(newSeed(), config);
+let state: AppState = createAppState(config);
 
 const fixedDt = config.simulation.fixedDtSeconds;
 let accumulator = 0;
 let lastTime = performance.now();
+// Presses wait here until a fixed step consumes them, so none are lost between frames.
+let pending: Action[] = [];
 
 function frame(now: number): void {
   accumulator += (now - lastTime) / 1000;
   lastTime = now;
-
-  if (input.consumeRestart() && (state.phase === "hit" || state.phase === "crash" || state.phase === "miss")) {
-    state = createInitialState(newSeed(), config);
-    accumulator = 0;
-  }
+  pending.push(...input.consumeActions());
 
   while (accumulator >= fixedDt) {
-    state = updateFlight(state, input.getSteering(), fixedDt, config);
+    state = updateApp(state, { actions: pending, steering: input.getSteering() }, fixedDt, config, newSeed);
+    pending = [];
     accumulator -= fixedDt;
   }
 
-  render(ctx!, state, config);
+  if (state.screen === "dashboard") {
+    renderDashboard(ctx!, state.dashboard, config);
+  } else {
+    render(ctx!, state.flight, config);
+  }
   requestAnimationFrame(frame);
 }
 

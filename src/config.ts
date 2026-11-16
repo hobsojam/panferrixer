@@ -99,6 +99,16 @@ export const config = {
     altitudeBandsEnabled: false,
   },
 
+  // The dashboard between missiles (design-notes 4.6). Counts are starting values;
+  // drain and refill rules come in a later slice.
+  dashboard: {
+    energyCells: 10, // placeholder: the energy economy is not designed yet
+    shieldPlates: 8, // design-notes 4.8: starting armour is eight plates
+    lowThreshold: 2, // at or below this many cells or plates, the last one flashes and the trace agitates
+    tracePoints: 120,
+    formName: "PROTOTYPE", // placeholder for the robot form shown in the name bar
+  },
+
   colors: {
     background: "#000000", // sky
     frame: "#ffe066",
@@ -111,6 +121,13 @@ export const config = {
     hit: "#ffe066",
     crash: "#ff6a3b",
     text: "#ffe066",
+    panel: "#0b1426",
+    panelSelected: "#ffe066",
+    panelDim: "#2a4a9c",
+    energy: "#3bff8a", // battery cells: rectangles
+    shield: "#3b9dff", // armour plates: trapezoids, so the two are never confused by colour alone
+    alert: "#ff6a3b",
+    trace: "#3bff8a",
   },
 };
 
