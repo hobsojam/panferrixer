@@ -2,7 +2,7 @@ import type { Config } from "./config";
 import { generateWorld, inTown, townCentres, type LocalMap, type Target, type Town } from "./local-map";
 import { findRoute } from "./route";
 
-/** The four verbs from design-notes 4.6. Missile and Move work; scan and grid disable do not yet. */
+/** The four verbs from design-notes 4.6. All four work. */
 export type Verb = "move" | "scan" | "missile" | "gridDisable";
 
 export type Action = "up" | "down" | "left" | "right" | "activate" | "cancel";
@@ -13,7 +13,7 @@ export const VERB_GRID: readonly (readonly Verb[])[] = [
   ["missile", "gridDisable"],
 ];
 
-export const AVAILABLE_VERBS: readonly Verb[] = ["move", "scan", "missile"];
+export const AVAILABLE_VERBS: readonly Verb[] = ["move", "scan", "missile", "gridDisable"];
 
 /** Eight compass points, north first, clockwise. */
 export const BEARINGS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
@@ -47,6 +47,8 @@ export interface World {
   pickupRadius: number; // a drop within this many cells is collected automatically
   blipRadius: number; // a scan within this many cells is marked close
   directionRadius: number; // a scan within this many cells gives a bearing
+  suppressionSeconds: number; // how long a network's shields stay down once opened
+  gridDisableCooldownSeconds: number; // time before grid disable can be used again
 }
 
 export interface DashboardState {
@@ -66,6 +68,10 @@ export interface DashboardState {
   ruins: number[]; // indices of targets destroyed by a missile
   found: number[]; // indices of ruins whose drop the robot has collected
   scan: ScanResult | null; // the last scan, shown until the next one
+  // Network power: for each network (town index), the dashboard time at which its shields come back.
+  // A network is suppressed while its time is ahead of the clock.
+  suppressedUntil: Record<number, number>;
+  gridReadyAt: number; // dashboard time at which grid disable can be used again
 }
 
 export interface DashboardStep {
@@ -90,6 +96,8 @@ export function worldFor(cfg: Config): World {
       pickupRadius: cfg.dashboard.pickupRadius,
       blipRadius: cfg.dashboard.blipRadius,
       directionRadius: cfg.dashboard.directionRadius,
+      suppressionSeconds: cfg.dashboard.suppressionSeconds,
+      gridDisableCooldownSeconds: cfg.dashboard.gridDisableCooldownSeconds,
     };
   }
   return cachedWorld;
@@ -114,7 +122,40 @@ export function createDashboardState(cfg: Config): DashboardState {
     ruins: [],
     found: [],
     scan: null,
+    suppressedUntil: {},
+    gridReadyAt: 0,
   };
+}
+
+/** The network a target belongs to: the town it stands in. */
+export function networkOf(target: Target, world: World): number {
+  return world.towns.findIndex((t) => inTown(t, world.townRadiusCols, world.townRadiusRows, target.col, target.row));
+}
+
+/** True while a network's shields are down. */
+export function isSuppressed(state: DashboardState, network: number): boolean {
+  return (state.suppressedUntil[network] ?? 0) > state.time;
+}
+
+/**
+ * Whether a missile fired now meets shields. Checked at launch: a missile fired while
+ * the network is powered deflects, and one fired while it is suppressed destroys the
+ * building even if the window closes during its flight. A power station has no shield.
+ */
+export function isShielded(state: DashboardState, target: Target, world: World): boolean {
+  if (target.kind === "power") return false;
+  return !isSuppressed(state, networkOf(target, world));
+}
+
+/** Takes a network's shields down for the window, starting now. The window is never shortened. */
+export function openWindow(state: DashboardState, network: number, world: World): DashboardState {
+  const until = state.time + world.suppressionSeconds;
+  return { ...state, suppressedUntil: { ...state.suppressedUntil, [network]: Math.max(until, state.suppressedUntil[network] ?? 0) } };
+}
+
+/** Grid disable is ready once its cooldown has passed. */
+export function gridDisableReady(state: DashboardState): boolean {
+  return state.time >= state.gridReadyAt;
 }
 
 /** Records a destroyed target as a ruin. Called when a missile hit returns the player to the dashboard. */
@@ -210,6 +251,11 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
       return { ...s, mode: "moving", cross };
     }
     if (verb === "scan") return { ...s, scan: scanFrom(s, world) };
+    if (verb === "gridDisable" && gridDisableReady(s)) {
+      // Takes down the shields of the network the robot is standing in, then starts the cooldown.
+      const opened = openWindow(s, s.location, world);
+      return { ...opened, gridReadyAt: s.time + world.gridDisableCooldownSeconds };
+    }
   }
   return s;
 }

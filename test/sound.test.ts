@@ -76,6 +76,7 @@ describe("flight sounds", () => {
     flight: { ...createInitialState(1, config), phase },
     target: world.targets[0],
     targetIndex: 0,
+    shielded: false,
   });
 
   it("launch when a flight starts", () => {

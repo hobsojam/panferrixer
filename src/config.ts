@@ -114,6 +114,9 @@ export const config = {
     blipRadius: 6, // a scan within this many cells is marked close
     directionRadius: 12, // a scan within this many cells gives a bearing
     walkSpeed: 3, // cells per second the robot walks across its local patch
+    // Placeholders, not from the original. The window is the author's guess: play-test it.
+    suppressionSeconds: 45, // how long a network's shields stay down after a power station is hit or grid disable is used
+    gridDisableCooldownSeconds: 60, // time before grid disable can be used again
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
 

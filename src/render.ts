@@ -8,7 +8,13 @@ import type { FlightState } from "./types";
 const OVERSCAN = 0.35;
 
 /** Pure drawing: reads state and config, never mutates either. */
-export function render(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config, targetKind: TargetKind | null = null): void {
+export function render(
+  ctx: CanvasRenderingContext2D,
+  state: FlightState,
+  cfg: Config,
+  targetKind: TargetKind | null = null,
+  shielded: boolean = false
+): void {
   const { width: w, height: h } = cfg.canvas;
   const horizonY = h * 0.55;
 
@@ -33,11 +39,11 @@ export function render(ctx: CanvasRenderingContext2D, state: FlightState, cfg: C
   }
 
   if (state.phase === "terminal" || state.phase === "hit") {
-    drawTarget(ctx, state, cfg, horizonY, targetKind);
+    drawTarget(ctx, state, cfg, horizonY, targetKind, shielded);
   }
 
   if (state.phase === "hit") {
-    drawHitBurst(ctx, state, cfg, horizonY);
+    drawHitBurst(ctx, state, cfg, horizonY, shielded);
   }
 
   if (state.phase === "crash") {
@@ -48,6 +54,10 @@ export function render(ctx: CanvasRenderingContext2D, state: FlightState, cfg: C
 
   if (state.phase === "miss") {
     drawText(ctx, "MISSED", w / 2, h / 2, 48, cfg.colors.text, Math.min(1, state.resultElapsed * 2));
+  }
+
+  if (state.phase === "hit" && shielded) {
+    drawText(ctx, "DEFLECTED", w / 2, h / 2, 48, cfg.colors.shield, Math.min(1, state.resultElapsed * 2));
   }
 
   drawMarker(ctx, state, cfg);
@@ -148,13 +158,40 @@ function targetAnchor(state: FlightState, cfg: Config, horizonY: number): { cent
   };
 }
 
-function drawTarget(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config, horizonY: number, kind: TargetKind | null): void {
+/** A faint ring over a shielded building. On a deflected hit it flashes and fades out. */
+function drawShieldRing(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, color: string, alpha: number): void {
+  if (alpha <= 0) return;
+  drawGlow(ctx, color, 6, () => {
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, size * 0.6, size * 0.5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawTarget(
+  ctx: CanvasRenderingContext2D,
+  state: FlightState,
+  cfg: Config,
+  horizonY: number,
+  kind: TargetKind | null,
+  shielded: boolean
+): void {
   const { centerX, centerY, size } = targetAnchor(state, cfg, horizonY);
+  // A deflected hit leaves the building standing, so only an unshielded hit makes it collapse.
+  const collapsing = state.phase === "hit" && !shielded;
+  if (shielded) {
+    const ringAlpha = state.phase === "hit" ? clamp(1 - state.resultElapsed / 0.6, 0, 0.5) : 0.35;
+    drawShieldRing(ctx, centerX, centerY, size, cfg.colors.shield, ringAlpha);
+  }
 
   if (kind && hasArt(kind)) {
     // Terminal phase: the chosen building is drawn in full detail, standing on the ground (base at the horizon).
-    // On a hit it shakes and fades while the blast runs, so it reads as collapsing.
-    const hit = state.phase === "hit" ? state.resultElapsed : null;
+    // On an unshielded hit it shakes and fades while the blast runs, so it reads as collapsing.
+    const hit = collapsing ? state.resultElapsed : null;
     const fade = hit === null ? 1 : clamp(1 - hit / 0.8, 0, 1);
     const shake = hit === null || hit > 0.3 ? 0 : Math.sin(hit * 80) * size * 0.02;
     ctx.save();
@@ -185,9 +222,11 @@ function drawTarget(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Conf
 }
 
 /** A missile hit on the building: the blast is centred on it, sized to it. */
-function drawHitBurst(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config, horizonY: number): void {
+function drawHitBurst(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config, horizonY: number, shielded: boolean): void {
   const { centerX, centerY, size } = targetAnchor(state, cfg, horizonY);
-  drawExplosion(ctx, centerX, centerY, size * 0.6, state.resultElapsed, cfg.colors.hit, cfg.colors.text, state.seed);
+  // A deflected missile bursts on the shield, in the shield's colour, rather than on the building.
+  const color = shielded ? cfg.colors.shield : cfg.colors.hit;
+  drawExplosion(ctx, centerX, centerY, size * 0.6, state.resultElapsed, color, cfg.colors.text, state.seed);
 }
 
 /** A missile crash into terrain: a blast with dust, centred on the view. */

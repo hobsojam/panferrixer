@@ -48,7 +48,8 @@ export interface World {
   targets: Target[];
 }
 
-const TARGET_KINDS: readonly TargetKind[] = ["power", "mine", "commsCentre", "dome"];
+/** The kinds besides the power station, which every network has exactly one of. */
+const TARGET_KINDS: readonly TargetKind[] = ["mine", "commsCentre", "dome"];
 
 const OFFSETS: readonly (readonly [number, number])[] = [
   [1, 0],
@@ -187,8 +188,9 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
       if (!inTown(town, cfg.townRadiusCols, cfg.townRadiusRows, col, row)) continue;
       if (map.tiers[row][col] === 0) continue;
       if (targets.some((t) => t.col === col && t.row === row)) continue;
-      const kind = TARGET_KINDS[Math.floor(rng() * TARGET_KINDS.length)];
-      const hasDrop = rng() < cfg.dropChance;
+      // Each network has one power station, placed first. It is never a drop: it cannot be destroyed.
+      const kind = placed === 0 ? "power" : TARGET_KINDS[Math.floor(rng() * TARGET_KINDS.length)];
+      const hasDrop = rng() < cfg.dropChance && kind !== "power";
       targets.push({ col, row, kind, hasDrop });
       placed += 1;
     }
