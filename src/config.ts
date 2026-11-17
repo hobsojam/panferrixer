@@ -109,6 +109,9 @@ export const config = {
     formName: "PROTOTYPE", // placeholder for the robot form shown in the name bar
     startNode: 0, // index into the network map where the robot begins
     targetRange: 2, // in map cells, Chebyshev distance from the cross: a target is only selected this close
+    pickupRadius: 1, // a drop within this many cells is picked up automatically
+    blipRadius: 6, // a scan within this many cells is marked close
+    directionRadius: 12, // a scan within this many cells gives a bearing
     walkSpeed: 3, // cells per second the robot walks across its local patch
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
@@ -125,6 +128,7 @@ export const config = {
     valleyBelow: 0.46,
     highAbove: 0.54,
     targetsPerTown: 3,
+    dropChance: 0.5, // placeholder: not every building holds a drop (design-notes 2.6)
     viewCols: 25, // the mini map's local window, in cells
     viewRows: 11,
   },

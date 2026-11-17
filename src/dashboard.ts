@@ -13,7 +13,16 @@ export const VERB_GRID: readonly (readonly Verb[])[] = [
   ["missile", "gridDisable"],
 ];
 
-export const AVAILABLE_VERBS: readonly Verb[] = ["move", "missile"];
+export const AVAILABLE_VERBS: readonly Verb[] = ["move", "scan", "missile"];
+
+/** Eight compass points, north first, clockwise. */
+export const BEARINGS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
+export type Bearing = (typeof BEARINGS)[number];
+
+/** What a scan found. Closer gives more: a bearing within the direction range, and a close flag inside the blip range. */
+export type ScanResult =
+  | { kind: "none" }
+  | { kind: "signal"; bearing: Bearing; close: boolean };
 
 export interface Cross {
   col: number;
@@ -35,6 +44,9 @@ export interface World {
   targets: readonly Target[];
   range: number;
   walkSpeed: number; // cells per second
+  pickupRadius: number; // a drop within this many cells is collected automatically
+  blipRadius: number; // a scan within this many cells is marked close
+  directionRadius: number; // a scan within this many cells gives a bearing
 }
 
 export interface DashboardState {
@@ -51,6 +63,9 @@ export interface DashboardState {
   route: Point[]; // cells still to walk through, in order; empty when standing still
   mapSelected: boolean; // the arrows have moved from the verb grid onto the map panel
   zoom: "local" | "full"; // the mini map: a window around the robot, or the whole world
+  ruins: number[]; // indices of targets destroyed by a missile
+  found: number[]; // indices of ruins whose drop the robot has collected
+  scan: ScanResult | null; // the last scan, shown until the next one
 }
 
 export interface DashboardStep {
@@ -72,6 +87,9 @@ export function worldFor(cfg: Config): World {
       targets,
       range: cfg.dashboard.targetRange,
       walkSpeed: cfg.dashboard.walkSpeed,
+      pickupRadius: cfg.dashboard.pickupRadius,
+      blipRadius: cfg.dashboard.blipRadius,
+      directionRadius: cfg.dashboard.directionRadius,
     };
   }
   return cachedWorld;
@@ -93,7 +111,16 @@ export function createDashboardState(cfg: Config): DashboardState {
     route: [],
     mapSelected: false,
     zoom: "local",
+    ruins: [],
+    found: [],
+    scan: null,
   };
+}
+
+/** Records a destroyed target as a ruin. Called when a missile hit returns the player to the dashboard. */
+export function markRuin(state: DashboardState, index: number): DashboardState {
+  if (state.ruins.includes(index)) return state;
+  return { ...state, ruins: [...state.ruins, index] };
 }
 
 export function selectedVerb(state: DashboardState): Verb {
@@ -107,6 +134,7 @@ export function selectedVerb(state: DashboardState): Verb {
 export function stepDashboard(state: DashboardState, actions: readonly Action[], dt: number, world: World): DashboardStep {
   let s: DashboardState = walkStep({ ...state, time: state.time + dt }, dt, world.walkSpeed);
   s = { ...s, location: townIndexAt(s.pos, world, s.location) };
+  s = collectDrops(s, world);
 
   let fire: Target | null = null;
   for (const action of actions) {
@@ -181,8 +209,51 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
       return { ...s, mode: "moving", cross };
     }
+    if (verb === "scan") return { ...s, scan: scanFrom(s, world) };
   }
   return s;
+}
+
+/** Straight-line distance from the robot to a point on the map. */
+function distanceTo(pos: Point, x: number, y: number): number {
+  return Math.hypot(x - pos.x, y - pos.y);
+}
+
+/** Collects any uncollected drop the robot is standing on. Pickup is automatic, not a verb. */
+function collectDrops(s: DashboardState, world: World): DashboardState {
+  const picked = s.ruins.filter(
+    (i) => world.targets[i].hasDrop && !s.found.includes(i) && distanceTo(s.pos, world.targets[i].col, world.targets[i].row) <= world.pickupRadius
+  );
+  if (picked.length === 0) return s;
+  return { ...s, found: [...s.found, ...picked] };
+}
+
+/** The nearest uncollected drop, read as a signal: none, far (a bearing), or close as well. */
+function scanFrom(s: DashboardState, world: World): ScanResult {
+  let best: Target | null = null;
+  let bestDistance = Infinity;
+  for (const i of s.ruins) {
+    const t = world.targets[i];
+    if (!t.hasDrop || s.found.includes(i)) continue;
+    const d = distanceTo(s.pos, t.col, t.row);
+    if (d < bestDistance) {
+      best = t;
+      bestDistance = d;
+    }
+  }
+  if (best === null || bestDistance > world.directionRadius) return { kind: "none" };
+  return {
+    kind: "signal",
+    bearing: bearingTo(s.pos, best.col, best.row),
+    close: bestDistance <= world.blipRadius,
+  };
+}
+
+/** Compass bearing from the robot to a point. North is up the map (smaller row numbers). */
+export function bearingTo(pos: Point, x: number, y: number): Bearing {
+  const degrees = (Math.atan2(x - pos.x, pos.y - y) * 180) / Math.PI;
+  const normalised = (degrees + 360) % 360;
+  return BEARINGS[Math.round(normalised / 45) % 8];
 }
 
 function movingAction(s: DashboardState, action: Action, world: World): DashboardState {
