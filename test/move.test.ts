@@ -21,6 +21,9 @@ const flatWorld: World = {
   suppressionSeconds: config.dashboard.suppressionSeconds,
   gridDisableCooldownSeconds: config.dashboard.gridDisableCooldownSeconds,
   scanPulseSeconds: config.dashboard.scanPulseSeconds,
+  hunterSpeed: config.dashboard.hunterSpeed,
+  hunterLeashCells: config.dashboard.hunterLeashCells,
+  hunterReloadSeconds: config.dashboard.hunterReloadSeconds,
 };
 
 function step(state: DashboardState, actions: Action[], dt = DT, w: World = flatWorld): DashboardState {

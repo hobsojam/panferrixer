@@ -50,6 +50,9 @@ export interface World {
   suppressionSeconds: number; // how long a network's shields stay down once opened
   gridDisableCooldownSeconds: number; // time before grid disable can be used again
   scanPulseSeconds: number; // how long a scan's ring takes to reach its full radius
+  hunterSpeed: number; // cells per second
+  hunterLeashCells: number; // how far an alerted hunter chases from its post
+  hunterReloadSeconds: number; // time between attacks from the same hunter
 }
 
 export interface DashboardState {
@@ -78,6 +81,10 @@ export interface DashboardState {
   purpose: "missile" | "gridDisable";
   // Hunters (target indices) that have seen the robot on a scan and will open fire when it is close.
   alerted: number[];
+  // Where each hunter is now, if it has moved from its post (missing means it is still on its post).
+  hunterPos: Record<number, Point>;
+  // Dashboard time at which each hunter can attack again.
+  hunterReadyAt: Record<number, number>;
   // Hits taken on the top shield plate so far. A plate goes when it reaches hitsPerPlate.
   shieldHits: number;
 }
@@ -107,6 +114,9 @@ export function worldFor(cfg: Config): World {
       suppressionSeconds: cfg.dashboard.suppressionSeconds,
       gridDisableCooldownSeconds: cfg.dashboard.gridDisableCooldownSeconds,
       scanPulseSeconds: cfg.dashboard.scanPulseSeconds,
+      hunterSpeed: cfg.dashboard.hunterSpeed,
+      hunterLeashCells: cfg.dashboard.hunterLeashCells,
+      hunterReloadSeconds: cfg.dashboard.hunterReloadSeconds,
     };
   }
   return cachedWorld;
@@ -136,6 +146,8 @@ export function createDashboardState(cfg: Config): DashboardState {
     pulseStarted: null,
     purpose: "missile",
     alerted: [],
+    hunterPos: {},
+    hunterReadyAt: {},
     shieldHits: 0,
   };
 }
@@ -166,12 +178,76 @@ export function openWindow(state: DashboardState, network: number, world: World)
   return { ...state, suppressedUntil: { ...state.suppressedUntil, [network]: Math.max(until, state.suppressedUntil[network] ?? 0) } };
 }
 
+/** Where a target is now. A hunter may have moved from its post; anything else is where it was placed. */
+export function positionOf(s: DashboardState, index: number, world: World): Point {
+  const moved = s.hunterPos[index];
+  if (moved) return moved;
+  const t = world.targets[index];
+  return { x: t.col, y: t.row };
+}
+
+/** The cell a target is in now, for targeting and drawing. */
+export function cellOf(s: DashboardState, index: number, world: World): Cross {
+  const p = positionOf(s, index, world);
+  return { col: Math.round(p.x), row: Math.round(p.y) };
+}
+
+/** Walks along a route for up to `distance` cells. Returns where it ends up and the route still to go. */
+export function walkPoint(pos: Point, route: readonly Point[], distance: number): { pos: Point; route: Point[] } {
+  let p = { ...pos };
+  let r = [...route];
+  let budget = distance;
+  while (budget > 0 && r.length > 0) {
+    const next = r[0];
+    const dx = next.x - p.x;
+    const dy = next.y - p.y;
+    const d = Math.hypot(dx, dy);
+    if (d <= budget) {
+      p = { ...next };
+      r = r.slice(1);
+      budget -= d;
+    } else {
+      p = { x: p.x + (dx / d) * budget, y: p.y + (dy / d) * budget };
+      budget = 0;
+    }
+  }
+  return { pos: p, route: r };
+}
+
+/**
+ * Moves the hunters. An alerted hunter walks toward the robot, and breaks off once the
+ * robot is beyond its leash. A hunter that is not alerted walks back to its post.
+ * A destroyed hunter does not move.
+ */
+export function moveHunters(s: DashboardState, world: World, dt: number): DashboardState {
+  let next = s;
+  world.targets.forEach((t, index) => {
+    if (t.kind !== "hunter" || next.ruins.includes(index)) return;
+    const post = { x: t.col, y: t.row };
+    const here = positionOf(next, index, world);
+    if (next.alerted.includes(index) && Math.hypot(here.x - post.x, here.y - post.y) > world.hunterLeashCells) {
+      next = { ...next, alerted: next.alerted.filter((i) => i !== index) };
+    }
+    const alerted = next.alerted.includes(index);
+    if (!alerted && here.x === post.x && here.y === post.y) return;
+    const goal = alerted ? { x: Math.round(next.pos.x), y: Math.round(next.pos.y) } : post;
+    const route = findRoute({ x: Math.round(here.x), y: Math.round(here.y) }, goal, world.map);
+    if (route === null) return;
+    const walked = walkPoint(here, route, world.hunterSpeed * dt);
+    // Once the route is used up the hunter is exactly at its goal, not a rounding error short of it.
+    const pos = walked.route.length === 0 ? goal : walked.pos;
+    next = { ...next, hunterPos: { ...next.hunterPos, [index]: pos } };
+  });
+  return next;
+}
+
 /** A scan's ring alerts every living hunter it reaches. Alerted hunters stay alerted until they engage. */
 export function alertHunters(s: DashboardState, world: World): number[] {
   const found = new Set(s.alerted);
   world.targets.forEach((t, index) => {
     if (t.kind !== "hunter" || s.ruins.includes(index)) return;
-    if (distanceTo(s.pos, t.col, t.row) <= world.directionRadius) found.add(index);
+    const p = positionOf(s, index, world);
+    if (distanceTo(s.pos, p.x, p.y) <= world.directionRadius) found.add(index);
   });
   return [...found];
 }
@@ -184,7 +260,9 @@ export function hunterInRange(s: DashboardState, world: World, range: number): n
   for (const index of s.alerted) {
     const t = world.targets[index];
     if (!t || t.kind !== "hunter" || s.ruins.includes(index)) continue;
-    if (distanceTo(s.pos, t.col, t.row) <= range) return index;
+    if (s.time < (s.hunterReadyAt[index] ?? 0)) continue;
+    const p = positionOf(s, index, world);
+    if (distanceTo(s.pos, p.x, p.y) <= range) return index;
   }
   return null;
 }
@@ -263,24 +341,8 @@ function townIndexAt(pos: Point, world: World, current: number): number {
 /** Walks the robot along its route at the walk speed, cell by cell, and stops it at the end. */
 function walkStep(s: DashboardState, dt: number, speed: number): DashboardState {
   if (s.route.length === 0) return s;
-  let pos = { ...s.pos };
-  let route = s.route;
-  let budget = speed * dt;
-  while (budget > 0 && route.length > 0) {
-    const next = route[0];
-    const dx = next.x - pos.x;
-    const dy = next.y - pos.y;
-    const distance = Math.hypot(dx, dy);
-    if (distance <= budget) {
-      pos = { ...next };
-      route = route.slice(1);
-      budget -= distance;
-    } else {
-      pos = { x: pos.x + (dx / distance) * budget, y: pos.y + (dy / distance) * budget };
-      budget = 0;
-    }
-  }
-  return { ...s, pos, route };
+  const walked = walkPoint(s.pos, s.route, speed * dt);
+  return { ...s, pos: walked.pos, route: walked.route };
 }
 
 function browseAction(s: DashboardState, action: Action, world: World): DashboardState {
@@ -301,7 +363,7 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
     const verb = selectedVerb(s);
     if (verb === "missile") {
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
-      return { ...s, mode: "targeting", purpose: "missile", cross, target: nearestTarget(cross, world, anyTarget) };
+      return { ...s, mode: "targeting", purpose: "missile", cross, target: nearestTarget(cross, world, anyTarget, (i) => cellOf(s, i, world)) };
     }
     if (verb === "move") {
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
@@ -311,7 +373,7 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
     if (verb === "gridDisable" && gridDisableReady(s)) {
       // Choose a power station with the cross, the same way as a missile target.
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
-      return { ...s, mode: "targeting", purpose: "gridDisable", cross, target: nearestTarget(cross, world, isPowerStation) };
+      return { ...s, mode: "targeting", purpose: "gridDisable", cross, target: nearestTarget(cross, world, isPowerStation, (i) => cellOf(s, i, world)) };
     }
   }
   return s;
@@ -382,7 +444,7 @@ function shiftCross(cross: Cross, action: Action, world: World): Cross {
 function moveCross(s: DashboardState, action: Action, world: World): DashboardState {
   const cross = shiftCross(s.cross, action, world);
   const filter = s.purpose === "gridDisable" ? isPowerStation : anyTarget;
-  return { ...s, cross, target: nearestTarget(cross, world, filter) };
+  return { ...s, cross, target: nearestTarget(cross, world, filter, (i) => cellOf(s, i, world)) };
 }
 
 function anyTarget(): boolean {
@@ -394,12 +456,18 @@ function isPowerStation(t: Target): boolean {
 }
 
 /** The target closest to the cross within range that passes the filter; ties go to the earlier target. */
-export function nearestTarget(cross: Cross, world: World, accept: (t: Target) => boolean = anyTarget): number | null {
+export function nearestTarget(
+  cross: Cross,
+  world: World,
+  accept: (t: Target) => boolean = anyTarget,
+  cellAt: (index: number) => Cross = (i) => ({ col: world.targets[i].col, row: world.targets[i].row })
+): number | null {
   let best: number | null = null;
   let bestDistance = Infinity;
   world.targets.forEach((t, index) => {
     if (!accept(t)) return;
-    const distance = Math.max(Math.abs(t.col - cross.col), Math.abs(t.row - cross.row));
+    const at = cellAt(index);
+    const distance = Math.max(Math.abs(at.col - cross.col), Math.abs(at.row - cross.row));
     if (distance <= world.range && distance < bestDistance) {
       best = index;
       bestDistance = distance;
