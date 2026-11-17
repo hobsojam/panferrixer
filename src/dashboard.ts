@@ -49,6 +49,8 @@ export interface DashboardState {
   target: number | null; // index into the world's targets, when one is in range
   pos: Point; // where the robot is on the map
   route: Point[]; // cells still to walk through, in order; empty when standing still
+  mapSelected: boolean; // the arrows have moved from the verb grid onto the map panel
+  zoom: "local" | "full"; // the mini map: a window around the robot, or the whole world
 }
 
 export interface DashboardStep {
@@ -89,6 +91,8 @@ export function createDashboardState(cfg: Config): DashboardState {
     target: null,
     pos: { x: start.x, y: start.y },
     route: [],
+    mapSelected: false,
+    zoom: "local",
   };
 }
 
@@ -154,10 +158,19 @@ function walkStep(s: DashboardState, dt: number, speed: number): DashboardState 
 }
 
 function browseAction(s: DashboardState, action: Action, world: World): DashboardState {
+  if (s.mapSelected) {
+    // The map panel sits to the right of the grid: left returns to the grid, Space changes zoom.
+    if (action === "left") return { ...s, mapSelected: false };
+    if (action === "activate") return { ...s, zoom: s.zoom === "local" ? "full" : "local" };
+    return s;
+  }
   if (action === "up") return { ...s, row: Math.max(0, s.row - 1) };
   if (action === "down") return { ...s, row: Math.min(VERB_GRID.length - 1, s.row + 1) };
   if (action === "left") return { ...s, col: Math.max(0, s.col - 1) };
-  if (action === "right") return { ...s, col: Math.min(VERB_GRID[s.row].length - 1, s.col + 1) };
+  if (action === "right") {
+    const lastCol = VERB_GRID[s.row].length - 1;
+    return s.col === lastCol ? { ...s, mapSelected: true } : { ...s, col: s.col + 1 };
+  }
   if (action === "activate") {
     const verb = selectedVerb(s);
     if (verb === "missile") {

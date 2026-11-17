@@ -108,7 +108,7 @@ function drawVerbGrid(ctx: CanvasRenderingContext2D, state: DashboardState, cfg:
     row.forEach((verb, colIndex) => {
       const x = originX + colIndex * (cellW + gap);
       const y = PANEL_TOP + rowIndex * (cellH + gap);
-      const selected = selectedVerb(state) === verb;
+      const selected = !state.mapSelected && selectedVerb(state) === verb;
       const color = selected ? c.panelSelected : c.panelDim;
 
       drawPanelFrame(ctx, x, y, cellW, cellH, color);
@@ -125,7 +125,7 @@ function drawSidePanel(ctx: CanvasRenderingContext2D, state: DashboardState, wor
   const width = 240;
   const height = PANEL_BOTTOM - PANEL_TOP;
 
-  drawPanelFrame(ctx, x, PANEL_TOP, width, height, c.panelDim);
+  drawPanelFrame(ctx, x, PANEL_TOP, width, height, state.mapSelected ? c.panelSelected : c.panelDim);
   drawLocalMap(ctx, state, world, cfg, x + 8, PANEL_TOP + 8, width - 16, 118);
 
   ctx.strokeStyle = c.panelDim;
@@ -141,9 +141,19 @@ function drawSidePanel(ctx: CanvasRenderingContext2D, state: DashboardState, wor
     drawMovingReadout(ctx, state, world, cfg, x);
   } else if (state.route.length > 0) {
     drawWalkingReadout(ctx, state, cfg, x);
+  } else if (state.mapSelected) {
+    drawMapReadout(ctx, state, cfg, x);
   } else {
     drawSelectedReadout(ctx, state, cfg, x);
   }
+}
+
+function drawMapReadout(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, x: number): void {
+  const c = cfg.colors;
+  drawText(ctx, "MAP", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
+  drawText(ctx, state.zoom === "local" ? "LOCAL VIEW" : "FULL MAP", x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
+  drawText(ctx, "SPACE TO CHANGE ZOOM", x + 14, PANEL_TOP + 204, 12, c.text, 0.7, "monospace", "left");
+  drawText(ctx, "LEFT TO RETURN TO VERBS", x + 14, PANEL_TOP + 222, 11, c.text, 0.7, "monospace", "left");
 }
 
 function drawSelectedReadout(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, x: number): void {
@@ -220,6 +230,10 @@ function drawLocalMap(
   w: number,
   h: number
 ): void {
+  if (state.zoom === "full") {
+    drawFullMap(ctx, state, world, cfg, x, y, w, h);
+    return;
+  }
   const c = cfg.colors;
   const { viewCols, viewRows } = cfg.localMap;
   const cellW = w / viewCols;
@@ -302,6 +316,73 @@ function drawLocalMap(
   ctx.restore();
 
   drawText(ctx, "LOCAL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
+}
+
+/**
+ * Full zoom: the whole world scaled into the panel. Towns are rings, targets are dots,
+ * and the robot is a dot at its real position. Nothing is centred or scrolled.
+ */
+function drawFullMap(
+  ctx: CanvasRenderingContext2D,
+  state: DashboardState,
+  world: World,
+  cfg: Config,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): void {
+  const c = cfg.colors;
+  const map = world.map;
+  const cellW = w / map.cols;
+  const cellH = h / map.rows;
+  const toScreen = (col: number, row: number): [number, number] => [x + (col + 0.5) * cellW, y + (row + 0.5) * cellH];
+
+  for (let row = 0; row < map.rows; row++) {
+    for (let col = 0; col < map.cols; col++) {
+      const tier = map.tiers[row][col];
+      if (tier === 0) continue;
+      ctx.globalAlpha = tier === 2 ? 0.45 : 0.15;
+      ctx.fillStyle = c.panelDim;
+      ctx.fillRect(x + col * cellW, y + row * cellH, cellW, cellH);
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  for (const town of world.towns) {
+    const [tx, ty] = toScreen(town.x, town.y);
+    ctx.strokeStyle = c.text;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(tx, ty, 3.5, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = c.text;
+  for (const t of world.targets) {
+    const [tx, ty] = toScreen(t.col, t.row);
+    ctx.beginPath();
+    ctx.arc(tx, ty, 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (state.mode !== "browse") {
+    const [cx, cy] = toScreen(state.cross.col, state.cross.row);
+    drawCross(ctx, cx, cy, c.panelSelected);
+  }
+
+  if (state.route.length > 0) {
+    const destination = state.route[state.route.length - 1];
+    const [dx, dy] = toScreen(destination.x, destination.y);
+    ctx.strokeStyle = c.panelSelected;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(dx - 2.5, dy - 2.5, 5, 5);
+  }
+
+  const [rx, ry] = toScreen(state.pos.x, state.pos.y);
+  drawRobot(ctx, rx, ry, state.time, c.panelSelected);
+
+  drawText(ctx, "FULL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
 }
 
 function drawCross(ctx: CanvasRenderingContext2D, cx: number, cy: number, color: string): void {
