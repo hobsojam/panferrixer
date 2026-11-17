@@ -185,13 +185,18 @@ const PLAY: Record<SoundEvent, Player> = {
     tone(c, t, 440, 0.15, "square", 0.1);
     tone(c, t + 0.2, 330, 0.15, "square", 0.1);
   },
+  // An explosion is a sharp crack, then a long rumble that falls in pitch, with a sub-bass drop under it.
   hit: (c, t) => {
-    noise(c, t, 0.6, 0.6, "lowpass", 1200, 100);
-    tone(c, t, 90, 0.5, "sine", 0.5, 40);
+    noise(c, t, 0.08, 0.9, "highpass", 2500, 800);
+    noise(c, t, 1.4, 0.8, "lowpass", 900, 60);
+    tone(c, t, 150, 0.9, "sine", 0.8, 28);
   },
+  // A crash into the ground is the same crack and rumble, with gravel and debris after it.
   crash: (c, t) => {
-    noise(c, t, 0.5, 0.5, "bandpass", 700, 200);
-    tone(c, t, 60, 0.4, "sine", 0.5, 30);
+    noise(c, t, 0.06, 0.8, "highpass", 3000, 1000);
+    noise(c, t, 1.2, 0.8, "lowpass", 700, 50);
+    noise(c, t + 0.05, 0.9, 0.5, "bandpass", 900, 150);
+    tone(c, t, 110, 0.7, "sine", 0.7, 25);
   },
   miss: (c, t) => {
     noise(c, t, 0.7, 0.25, "highpass", 2000, 400);
