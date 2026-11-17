@@ -184,7 +184,7 @@ Manual and author agree on how the original works: the scanner is used after des
 
 The proposal gives it a different job:
 - A ping with a radius, shown on the map, with the radius as an upgrade stat.
-- Graded information: close signals clear, distant ones a faint blip with rough direction.
+- Graded information, with fixed ranges (not tied to the size of a town, so the experience is the same everywhere): within 1 cell the drop is picked up; within 6 cells a blip shows with no direction; within 12 cells the direction shows. The numbers are placeholders in config. The player already knows roughly where to scan, since a drop lands where the missile hit, so the scan is a search around that spot.
 - A pacing cost: a cooldown or a small drain on the batteries.
 - Pickup by proximity once drops land at the building's centre.
 - Role: with about 80 domes and six pieces, blind-firing is hopeless. Scan should tell the player which buildings are worth a missile (a shot at an empty building is wasted), which also removes the "each town has one thing" predictability.
