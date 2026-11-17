@@ -1,4 +1,5 @@
-import { reachableFrom } from "./route";
+import { NETWORK } from "./map";
+import { reachableFrom, type Cell } from "./route";
 import { createRng } from "./rng";
 
 /** 0 = valley, 1 = ground, 2 = high ground. */
@@ -6,12 +7,16 @@ export type Tier = 0 | 1 | 2;
 
 export interface LocalMapConfig {
   worldSeed: number;
-  cols: number;
+  cols: number; // the whole map, in cells
   rows: number;
+  townRadiusCols: number; // half-size of a town's area, in cells
+  townRadiusRows: number;
   smoothingPasses: number;
   valleyBelow: number; // raw height below this is a valley
   highAbove: number; // raw height above this is high ground
-  targetsPerNode: number;
+  targetsPerTown: number;
+  viewCols: number; // the mini map's local window
+  viewRows: number;
 }
 
 export interface LocalMap {
@@ -20,12 +25,61 @@ export interface LocalMap {
   tiers: Tier[][];
 }
 
+/** A town is a place on the map: its centre cell. Its area is an ellipse around the centre. */
+export interface Town {
+  x: number;
+  y: number;
+}
+
+/** Placeholder target kinds: the comms centre replaces the original beacon (design-notes 4.4). Art is not designed yet. */
+export type TargetKind = "power" | "mine" | "commsCentre" | "dome";
+
+export interface Target {
+  col: number;
+  row: number;
+  kind: TargetKind;
+}
+
+export interface World {
+  map: LocalMap;
+  towns: Town[];
+  targets: Target[];
+}
+
+const TARGET_KINDS: readonly TargetKind[] = ["power", "mine", "commsCentre", "dome"];
+
+const OFFSETS: readonly (readonly [number, number])[] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
+/** Where each town sits: the network's hand-placed positions, spread over the whole map. */
+export function townCentres(cfg: LocalMapConfig): Town[] {
+  const marginX = cfg.townRadiusCols + 1;
+  const marginY = cfg.townRadiusRows + 1;
+  return NETWORK.nodes.map((n) => ({
+    x: Math.round(marginX + n.x * (cfg.cols - 1 - 2 * marginX)),
+    y: Math.round(marginY + n.y * (cfg.rows - 1 - 2 * marginY)),
+  }));
+}
+
+/** True when (x, y) is inside the town's elliptical area. */
+export function inTown(town: Town, radiusCols: number, radiusRows: number, x: number, y: number): boolean {
+  const dx = (x - town.x) / radiusCols;
+  const dy = (y - town.y) / radiusRows;
+  return dx * dx + dy * dy <= 1;
+}
+
 /**
- * A local patch of ground around one network node. Deterministic: the same world
- * seed and node always give the same patch, so it can be reproduced in tests.
+ * The whole map: one terrain grid with a town at each network node. Deterministic
+ * from the world seed, so the same world is rebuilt every time it is needed.
+ * Towns are valley or ground. Afterwards the fewest high-ground cells needed are
+ * opened so every town can be walked to from every other.
  */
-export function generateLocalMap(node: number, cfg: LocalMapConfig): LocalMap {
-  const rng = createRng(cfg.worldSeed * 7919 + node * 104729);
+export function generateWorld(cfg: LocalMapConfig): World {
+  const rng = createRng(cfg.worldSeed * 7919);
   let heights: number[][] = Array.from({ length: cfg.rows }, () =>
     Array.from({ length: cfg.cols }, () => rng())
   );
@@ -33,54 +87,110 @@ export function generateLocalMap(node: number, cfg: LocalMapConfig): LocalMap {
     heights = smooth(heights);
   }
 
-  const tiers = heights.map((row) =>
+  const tiers: Tier[][] = heights.map((row) =>
     row.map((h): Tier => (h < cfg.valleyBelow ? 0 : h > cfg.highAbove ? 2 : 1))
   );
   const map: LocalMap = { cols: cfg.cols, rows: cfg.rows, tiers };
+  const towns = townCentres(cfg);
 
-  // The robot starts in the middle and must be able to walk out to either side.
-  const start = { x: Math.floor(cfg.cols / 2), y: Math.floor(cfg.rows / 2) };
-  tiers[start.y][start.x] = tiers[start.y][start.x] === 2 ? 1 : tiers[start.y][start.x];
-  openPassage(map, start, 0);
-  openPassage(map, start, cfg.cols - 1);
-  return map;
+  for (const town of towns) {
+    for (let y = town.y - cfg.townRadiusRows; y <= town.y + cfg.townRadiusRows; y++) {
+      for (let x = town.x - cfg.townRadiusCols; x <= town.x + cfg.townRadiusCols; x++) {
+        if (inTown(town, cfg.townRadiusCols, cfg.townRadiusRows, x, y) && tiers[y][x] === 2) tiers[y][x] = 1;
+      }
+    }
+  }
+
+  connectTowns(map, towns);
+  return { map, towns, targets: placeTargets(map, towns, cfg) };
+}
+
+/** Repeatedly opens the cheapest route from the connected towns to one that is cut off. */
+function connectTowns(map: LocalMap, towns: Town[]): void {
+  const key = (x: number, y: number) => y * map.cols + x;
+  for (;;) {
+    const reached = reachableFrom(towns[0], map);
+    const unreached = towns.filter((t) => !reached.has(key(t.x, t.y)));
+    if (unreached.length === 0) return;
+
+    const sources: Cell[] = [...reached].map((k) => ({ x: k % map.cols, y: Math.floor(k / map.cols) }));
+    const goals = new Set(unreached.map((t) => key(t.x, t.y)));
+    const path = cheapestPath(map, sources, (x, y) => goals.has(key(x, y)));
+    if (path === null) return;
+    for (const c of path) {
+      if (map.tiers[c.y][c.x] === 2) map.tiers[c.y][c.x] = 1;
+    }
+  }
 }
 
 /**
- * Turns the fewest high-ground cells needed into ground so that the start can reach
- * the given edge column. Each step opens the high cell next to the reachable area
- * that is nearest the edge, and nearest the start row when tied.
+ * Least high-ground route from any source cell to a goal cell. Entering high ground
+ * costs one, anything else costs nothing. Returns the cells from source to goal.
  */
-function openPassage(map: LocalMap, start: { x: number; y: number }, edgeX: number): void {
-  for (;;) {
-    const reached = reachableFrom(start, map);
-    for (const key of reached) {
-      if (key % map.cols === edgeX) return;
-    }
+function cheapestPath(map: LocalMap, sources: Cell[], isGoal: (x: number, y: number) => boolean): Cell[] | null {
+  const key = (x: number, y: number) => y * map.cols + x;
+  const dist = new Map<number, number>();
+  const prev = new Map<number, number>();
+  let frontier: Cell[] = [];
+  for (const s of sources) {
+    dist.set(key(s.x, s.y), 0);
+    prev.set(key(s.x, s.y), key(s.x, s.y));
+    frontier.push(s);
+  }
 
-    let best: { x: number; y: number } | null = null;
-    let bestScore = Infinity;
-    for (const key of reached) {
-      const x = key % map.cols;
-      const y = Math.floor(key / map.cols);
-      for (const [nx, ny] of [
-        [x + 1, y],
-        [x - 1, y],
-        [x, y + 1],
-        [x, y - 1],
-      ]) {
+  for (let d = 0; frontier.length > 0; d++) {
+    const next: Cell[] = [];
+    for (let i = 0; i < frontier.length; i++) {
+      const cell = frontier[i];
+      const k = key(cell.x, cell.y);
+      if (dist.get(k) !== d) continue;
+      if (isGoal(cell.x, cell.y)) {
+        const path: Cell[] = [];
+        let cur = k;
+        while (prev.get(cur) !== cur) {
+          path.push({ x: cur % map.cols, y: Math.floor(cur / map.cols) });
+          cur = prev.get(cur)!;
+        }
+        path.push({ x: cur % map.cols, y: Math.floor(cur / map.cols) });
+        return path.reverse();
+      }
+      for (const [dx, dy] of OFFSETS) {
+        const nx = cell.x + dx;
+        const ny = cell.y + dy;
         if (nx < 0 || ny < 0 || nx >= map.cols || ny >= map.rows) continue;
-        if (map.tiers[ny][nx] !== 2) continue;
-        const score = Math.abs(nx - edgeX) * 1000 + Math.abs(ny - start.y);
-        if (score < bestScore) {
-          bestScore = score;
-          best = { x: nx, y: ny };
+        const nk = key(nx, ny);
+        const cost = map.tiers[ny][nx] === 2 ? 1 : 0;
+        const nd = d + cost;
+        if (!dist.has(nk) || dist.get(nk)! > nd) {
+          dist.set(nk, nd);
+          prev.set(nk, k);
+          (cost === 0 ? frontier : next).push({ x: nx, y: ny });
         }
       }
     }
-    if (best === null) return;
-    map.tiers[best.y][best.x] = 1;
+    frontier = next;
   }
+  return null;
+}
+
+/** Placeholder targets inside the towns: never in a valley, and distinct cells. */
+function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target[] {
+  const rng = createRng(cfg.worldSeed * 6151 + 1);
+  const targets: Target[] = [];
+  for (const town of towns) {
+    let placed = 0;
+    for (let attempt = 0; attempt < 500 && placed < cfg.targetsPerTown; attempt++) {
+      const col = town.x + Math.round((rng() * 2 - 1) * cfg.townRadiusCols);
+      const row = town.y + Math.round((rng() * 2 - 1) * cfg.townRadiusRows);
+      if (!inTown(town, cfg.townRadiusCols, cfg.townRadiusRows, col, row)) continue;
+      if (map.tiers[row][col] === 0) continue;
+      if (targets.some((t) => t.col === col && t.row === row)) continue;
+      const kind = TARGET_KINDS[Math.floor(rng() * TARGET_KINDS.length)];
+      targets.push({ col, row, kind });
+      placed += 1;
+    }
+  }
+  return targets;
 }
 
 /** Averages each cell with its neighbours, clamping at the edges. */
@@ -102,33 +212,4 @@ function smooth(grid: number[][]): number[][] {
       return sum / count;
     })
   );
-}
-
-/** Placeholder target kinds: the comms centre replaces the original beacon (design-notes 4.4). Art is not designed yet. */
-export type TargetKind = "power" | "mine" | "commsCentre" | "dome";
-
-export interface Target {
-  col: number;
-  row: number;
-  kind: TargetKind;
-}
-
-const TARGET_KINDS: readonly TargetKind[] = ["power", "mine", "commsCentre", "dome"];
-
-/**
- * Placeholder targets on a node's patch: on ground or high ground, never in a valley,
- * and distinct cells. Deterministic from the world seed and node.
- */
-export function targetsFor(node: number, map: LocalMap, cfg: LocalMapConfig): Target[] {
-  const rng = createRng(cfg.worldSeed * 6151 + node * 2111 + 1);
-  const targets: Target[] = [];
-  for (let attempt = 0; attempt < 500 && targets.length < cfg.targetsPerNode; attempt++) {
-    const row = Math.floor(rng() * map.rows);
-    const col = Math.floor(rng() * map.cols);
-    if (map.tiers[row][col] === 0) continue;
-    if (targets.some((t) => t.row === row && t.col === col)) continue;
-    const kind = TARGET_KINDS[Math.floor(rng() * TARGET_KINDS.length)];
-    targets.push({ col, row, kind });
-  }
-  return targets;
 }

@@ -6,7 +6,7 @@ import { createInitialState } from "../src/flight";
 
 const DT = 1 / 60;
 const seeds = () => 12345;
-const world = worldFor(config.dashboard.startNode, config);
+const world = worldFor(config);
 
 /** A dashboard with the cross already on target 0, ready to fire. */
 function readyToFire(): AppState {

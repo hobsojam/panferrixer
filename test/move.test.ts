@@ -1,20 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
-import { createDashboardState, stepDashboard, worldFor, type Action, type DashboardState, type NodeWorld } from "../src/dashboard";
+import { createDashboardState, stepDashboard, worldFor, type Action, type DashboardState, type World } from "../src/dashboard";
 import { mapOf } from "./helpers";
 
 const DT = 1 / 60;
-const world = worldFor(config.dashboard.startNode, config);
+const world = worldFor(config);
 
 /** A flat, all-ground patch, so walking tests do not depend on the generated terrain. */
-const flatWorld: NodeWorld = {
+const flatWorld: World = {
   map: mapOf(Array(config.localMap.rows).fill("1".repeat(config.localMap.cols))),
+  towns: [],
+  townRadiusCols: 7,
+  townRadiusRows: 4,
   targets: [],
   range: config.dashboard.targetRange,
   walkSpeed: config.dashboard.walkSpeed,
 };
 
-function step(state: DashboardState, actions: Action[], dt = DT, w: NodeWorld = flatWorld): DashboardState {
+function step(state: DashboardState, actions: Action[], dt = DT, w: World = flatWorld): DashboardState {
   return stepDashboard(state, actions, dt, w).state;
 }
 
@@ -45,7 +48,7 @@ describe("choosing a walk point", () => {
   });
 
   it("refuses a point on high ground and keeps the chooser open", () => {
-    const blocked: NodeWorld = { ...flatWorld, map: mapOf(["121", "111", "111"]) };
+    const blocked: World = { ...flatWorld, map: mapOf(["121", "111", "111"]) };
     const start = { ...createDashboardState(config), mode: "moving" as const, pos: { x: 0, y: 1 }, cross: { col: 1, row: 0 } };
     const s = step(start, ["activate"], DT, blocked);
     expect(s.mode).toBe("moving");

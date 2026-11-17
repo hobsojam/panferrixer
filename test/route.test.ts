@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
-import { generateLocalMap } from "../src/local-map";
+import { generateWorld } from "../src/local-map";
 import { findRoute, isPassable } from "../src/route";
 import { mapOf } from "./helpers";
 
@@ -50,17 +50,12 @@ describe("findRoute", () => {
   });
 });
 
-describe("generated terrain leaves a passable path", () => {
-  // From the starting cell, the robot must be able to reach the left and right edges
-  // of its patch, so it can always get out of the middle.
-  for (let node = 0; node < 10; node++) {
-    it(`node ${node}: the start cell reaches both side edges`, () => {
-      const map = generateLocalMap(node, config.localMap);
-      const start = { x: Math.floor(map.cols / 2), y: Math.floor(map.rows / 2) };
-      const rows = [...Array(map.rows).keys()];
-      const left = rows.some((y) => findRoute(start, { x: 0, y }, map) !== null);
-      const right = rows.some((y) => findRoute(start, { x: map.cols - 1, y }, map) !== null);
-      expect(left && right).toBe(true);
-    });
-  }
+describe("the world leaves a passable path", () => {
+  // Every town must be walkable from every other, so the robot can always get anywhere.
+  it("every town can be walked to from the first town", () => {
+    const { map, towns } = generateWorld(config.localMap);
+    for (const t of towns) {
+      expect(findRoute(towns[0], t, map), `town at ${t.x},${t.y}`).not.toBeNull();
+    }
+  });
 });

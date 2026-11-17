@@ -1,6 +1,6 @@
 import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
-import { AVAILABLE_VERBS, VERB_GRID, isLow, selectedVerb, worldFor, type DashboardState, type NodeWorld, type Verb } from "./dashboard";
+import { AVAILABLE_VERBS, VERB_GRID, isLow, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
 import { drawGlow } from "./render";
 import { findRoute } from "./route";
@@ -23,7 +23,7 @@ const TARGET_LABELS: Record<Target["kind"], string> = {
 export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config): void {
   const { width: w, height: h } = cfg.canvas;
   const c = cfg.colors;
-  const world = worldFor(state.location, cfg);
+  const world = worldFor(cfg);
 
   ctx.fillStyle = c.background;
   ctx.fillRect(0, 0, w, h);
@@ -119,7 +119,7 @@ function drawVerbGrid(ctx: CanvasRenderingContext2D, state: DashboardState, cfg:
 }
 
 /** The right-hand panel: the local view on top, and a readout beneath it that depends on what the robot is doing. */
-function drawSidePanel(ctx: CanvasRenderingContext2D, state: DashboardState, world: NodeWorld, cfg: Config): void {
+function drawSidePanel(ctx: CanvasRenderingContext2D, state: DashboardState, world: World, cfg: Config): void {
   const c = cfg.colors;
   const x = 700;
   const width = 240;
@@ -169,7 +169,7 @@ function drawSelectedReadout(ctx: CanvasRenderingContext2D, state: DashboardStat
   }
 }
 
-function drawMovingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, world: NodeWorld, cfg: Config, x: number): void {
+function drawMovingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, world: World, cfg: Config, x: number): void {
   const c = cfg.colors;
   const reachable = findRoute(state.pos, { x: state.cross.col, y: state.cross.row }, world.map) !== null;
   drawText(ctx, "WALK TO", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
@@ -189,7 +189,7 @@ function drawWalkingReadout(ctx: CanvasRenderingContext2D, state: DashboardState
   drawText(ctx, "CHOOSE ANOTHER POINT TO REDIRECT", x + 14, PANEL_TOP + 204, 11, c.text, 0.7, "monospace", "left");
 }
 
-function drawTargetingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, world: NodeWorld, cfg: Config, x: number): void {
+function drawTargetingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, world: World, cfg: Config, x: number): void {
   const c = cfg.colors;
   const target = state.target === null ? null : world.targets[state.target];
 
@@ -205,15 +205,15 @@ function drawTargetingReadout(ctx: CanvasRenderingContext2D, state: DashboardSta
 }
 
 /**
- * Local view: the ground of the robot's node. Valleys are faint dots, ground is dots,
- * high ground is filled. Buildings are always shown. The robot moves across the view
- * as it walks. While targeting or choosing a walk point, the cross shows the pointer,
- * and during walking the destination is marked.
+ * Local view: a window of the whole map, centred on the robot, so the ground moves
+ * past it as the robot walks. Valleys are faint dots, ground is dots, high ground is
+ * filled. Buildings are always shown. While targeting or choosing a walk point, the
+ * cross shows the pointer, and while walking the route and its destination are marked.
  */
 function drawLocalMap(
   ctx: CanvasRenderingContext2D,
   state: DashboardState,
-  world: NodeWorld,
+  world: World,
   cfg: Config,
   x: number,
   y: number,
@@ -221,33 +221,47 @@ function drawLocalMap(
   h: number
 ): void {
   const c = cfg.colors;
-  const map = world.map;
-  const cellW = w / map.cols;
-  const cellH = h / map.rows;
-  const cellCentre = (col: number, row: number): [number, number] => [x + (col + 0.5) * cellW, y + (row + 0.5) * cellH];
+  const { viewCols, viewRows } = cfg.localMap;
+  const cellW = w / viewCols;
+  const cellH = h / viewRows;
+  // Screen centre of a map cell. The robot's own cell lands in the middle of the view.
+  const toScreen = (col: number, row: number): [number, number] => [
+    x + (col - state.pos.x + viewCols / 2) * cellW,
+    y + (row - state.pos.y + viewRows / 2) * cellH,
+  ];
 
-  map.tiers.forEach((row, r) =>
-    row.forEach((tier, col) => {
-      const cx = x + col * cellW;
-      const cy = y + r * cellH;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+
+  const map = world.map;
+  const firstCol = Math.max(0, Math.floor(state.pos.x - viewCols / 2) - 1);
+  const lastCol = Math.min(map.cols - 1, Math.ceil(state.pos.x + viewCols / 2) + 1);
+  const firstRow = Math.max(0, Math.floor(state.pos.y - viewRows / 2) - 1);
+  const lastRow = Math.min(map.rows - 1, Math.ceil(state.pos.y + viewRows / 2) + 1);
+  for (let row = firstRow; row <= lastRow; row++) {
+    for (let col = firstCol; col <= lastCol; col++) {
+      const tier = map.tiers[row][col];
+      const [cx, cy] = toScreen(col, row);
       if (tier === 2) {
         ctx.globalAlpha = 0.45;
         ctx.fillStyle = c.panelDim;
-        ctx.fillRect(cx + 1, cy + 1, cellW - 2, cellH - 2);
+        ctx.fillRect(cx - cellW / 2 + 1, cy - cellH / 2 + 1, cellW - 2, cellH - 2);
       } else {
         ctx.globalAlpha = tier === 1 ? 0.3 : 0.12;
         ctx.fillStyle = c.panelDim;
         ctx.beginPath();
-        ctx.arc(cx + cellW / 2, cy + cellH / 2, 1, 0, Math.PI * 2);
+        ctx.arc(cx, cy, 1, 0, Math.PI * 2);
         ctx.fill();
       }
-    })
-  );
+    }
+  }
   ctx.globalAlpha = 1;
 
   const targeting = state.mode === "targeting";
   world.targets.forEach((t, index) => {
-    const [tx, ty] = cellCentre(t.col, t.row);
+    const [tx, ty] = toScreen(t.col, t.row);
     const inRange = targeting && state.target === index;
     const color = inRange ? c.panelSelected : c.text;
     const iconWidth = cfg.dashboard.targetIconWidth;
@@ -261,7 +275,7 @@ function drawLocalMap(
   });
 
   if (state.mode !== "browse") {
-    const [cx, cy] = cellCentre(state.cross.col, state.cross.row);
+    const [cx, cy] = toScreen(state.cross.col, state.cross.row);
     drawCross(ctx, cx, cy, c.panelSelected);
   }
 
@@ -269,14 +283,14 @@ function drawLocalMap(
     ctx.globalAlpha = 0.6;
     ctx.fillStyle = c.panelSelected;
     for (const cell of state.route) {
-      const [rx, ry] = cellCentre(cell.x, cell.y);
+      const [rx, ry] = toScreen(cell.x, cell.y);
       ctx.beginPath();
       ctx.arc(rx, ry, 1.2, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
     const destination = state.route[state.route.length - 1];
-    const [wx, wy] = cellCentre(destination.x, destination.y);
+    const [wx, wy] = toScreen(destination.x, destination.y);
     drawGlow(ctx, c.panelSelected, 0, () => {
       ctx.strokeStyle = c.panelSelected;
       ctx.lineWidth = 1;
@@ -284,9 +298,8 @@ function drawLocalMap(
     });
   }
 
-  const rx = x + (state.pos.x + 0.5) * cellW;
-  const ry = y + (state.pos.y + 0.5) * cellH;
-  drawRobot(ctx, rx, ry, state.time, c.panelSelected);
+  drawRobot(ctx, x + w / 2, y + h / 2, state.time, c.panelSelected);
+  ctx.restore();
 
   drawText(ctx, "LOCAL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
 }

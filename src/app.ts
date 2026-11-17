@@ -34,7 +34,7 @@ export function updateApp(
   newSeed: () => number
 ): AppState {
   if (state.screen === "dashboard") {
-    const step = stepDashboard(state.dashboard, input.actions, dt, worldFor(state.dashboard.location, cfg));
+    const step = stepDashboard(state.dashboard, input.actions, dt, worldFor(cfg));
     if (step.fire) {
       return {
         screen: "flight",

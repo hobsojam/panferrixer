@@ -3,7 +3,7 @@ import { config } from "../src/config";
 import { createDashboardState, isLow, nearestTarget, selectedVerb, stepDashboard, worldFor, type Action, type DashboardState } from "../src/dashboard";
 
 const DT = 1 / 60;
-const world = worldFor(config.dashboard.startNode, config);
+const world = worldFor(config);
 
 function step(state: DashboardState, actions: Action[]) {
   return stepDashboard(state, actions, DT, world);
@@ -32,12 +32,12 @@ describe("dashboard selection", () => {
 });
 
 describe("entering targeting", () => {
-  it("activating Missile enters targeting with the cross at the centre", () => {
+  it("activating Missile enters targeting with the cross on the robot", () => {
     const s = { ...createDashboardState(config), row: 1, col: 0 };
     const next = step(s, ["activate"]).state;
 
     expect(next.mode).toBe("targeting");
-    expect(next.cross).toEqual({ col: Math.floor(world.map.cols / 2), row: Math.floor(world.map.rows / 2) });
+    expect(next.cross).toEqual({ col: Math.round(s.pos.x), row: Math.round(s.pos.y) });
   });
 
   it("activating a verb that is not built does nothing", () => {
