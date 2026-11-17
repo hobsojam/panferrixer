@@ -44,7 +44,7 @@ function frame(now: number): void {
   if (state.screen === "dashboard") {
     renderDashboard(ctx!, state.dashboard, config, !sound.isMuted());
   } else {
-    render(ctx!, state.flight, config, state.target.kind);
+    render(ctx!, state.flight, config, state.target.kind, state.shielded);
   }
   requestAnimationFrame(frame);
 }

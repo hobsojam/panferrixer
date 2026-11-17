@@ -17,6 +17,7 @@ export type SoundEvent =
   | "terminal"
   | "warning"
   | "hit"
+  | "deflect"
   | "crash"
   | "miss";
 
@@ -24,7 +25,7 @@ export type SoundEvent =
 export function eventsBetween(prev: AppState, next: AppState, cfg: Config): SoundEvent[] {
   if (prev.screen === "dashboard" && next.screen === "flight") return ["launch"];
   if (prev.screen === "dashboard" && next.screen === "dashboard") return dashboardEvents(prev.dashboard, next.dashboard, cfg);
-  if (prev.screen === "flight" && next.screen === "flight") return flightEvents(prev.flight, next.flight);
+  if (prev.screen === "flight" && next.screen === "flight") return flightEvents(prev.flight, next.flight, next.shielded);
   return [];
 }
 
@@ -53,13 +54,13 @@ function dashboardEvents(prev: DashboardState, next: DashboardState, cfg: Config
   return events;
 }
 
-function flightEvents(prev: FlightState, next: FlightState): SoundEvent[] {
+function flightEvents(prev: FlightState, next: FlightState, shielded: boolean): SoundEvent[] {
   if (prev.phase === next.phase) return [];
   switch (next.phase) {
     case "terminal":
       return ["terminal"];
     case "hit":
-      return ["hit"];
+      return [shielded ? "deflect" : "hit"];
     case "crash":
       return ["crash"];
     case "miss":
@@ -196,6 +197,11 @@ const PLAY: Record<SoundEvent, Player> = {
     tone(c, t, 150, 0.9, "sine", 0.8, 28);
   },
   // A crash into the ground is the same crack and rumble, with gravel and debris after it.
+  // A shield ping: a bright metallic ring that fades, instead of a blast.
+  deflect: (c, t) => {
+    tone(c, t, 2600, 0.5, "sine", 0.3, 1900);
+    tone(c, t, 3900, 0.3, "triangle", 0.1, 2800);
+  },
   crash: (c, t) => {
     noise(c, t, 0.06, 0.8, "highpass", 3000, 1000);
     noise(c, t, 1.2, 0.8, "lowpass", 700, 50);

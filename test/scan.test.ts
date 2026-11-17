@@ -20,16 +20,19 @@ function scanningAt(x: number, y: number): DashboardState {
 describe("drops and ruins", () => {
   it("a missile hit turns the target into a ruin", () => {
     const world = worldFor(config);
+    // A power station is never a ruin, so use the first building that can be destroyed.
+    const index = world.targets.findIndex((t) => t.kind !== "power");
     const flying: AppState = {
       screen: "flight",
       dashboard: createDashboardState(config),
       flight: { ...createInitialState(1, config), phase: "hit" },
-      target: world.targets[0],
-      targetIndex: 0,
+      target: world.targets[index],
+      targetIndex: index,
+      shielded: false,
     };
     const next = updateApp(flying, { actions: ["activate"], steering: 0 }, DT, config, () => 1);
     expect(next.screen).toBe("dashboard");
-    if (next.screen === "dashboard") expect(next.dashboard.ruins).toEqual([0]);
+    if (next.screen === "dashboard") expect(next.dashboard.ruins).toEqual([index]);
   });
 
   it("a miss does not create a ruin", () => {
@@ -39,6 +42,7 @@ describe("drops and ruins", () => {
       flight: { ...createInitialState(1, config), phase: "miss" },
       target: base.targets[0],
       targetIndex: 0,
+      shielded: false,
     };
     const next = updateApp(flying, { actions: ["activate"], steering: 0 }, DT, config, () => 1);
     if (next.screen === "dashboard") expect(next.dashboard.ruins).toEqual([]);

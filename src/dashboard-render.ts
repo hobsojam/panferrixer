@@ -1,6 +1,6 @@
 import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
-import { AVAILABLE_VERBS, VERB_GRID, isLow, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
+import { AVAILABLE_VERBS, VERB_GRID, gridDisableReady, isLow, isSuppressed, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
 import { drawGlow } from "./render";
 import { findRoute } from "./route";
@@ -163,6 +163,10 @@ function drawSelectedReadout(ctx: CanvasRenderingContext2D, state: DashboardStat
     drawScanReadout(ctx, state, cfg, x);
     return;
   }
+  if (verb === "gridDisable") {
+    drawGridReadout(ctx, state, cfg, x);
+    return;
+  }
   const available = AVAILABLE_VERBS.includes(verb);
   drawText(ctx, "SELECTED", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
   drawText(ctx, VERB_LABELS[verb], x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
@@ -180,6 +184,22 @@ function drawSelectedReadout(ctx: CanvasRenderingContext2D, state: DashboardStat
   if (available) {
     const prompt = verb === "move" ? "SPACE TO CHOOSE A POINT" : "SPACE TO FIRE";
     drawText(ctx, prompt, x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
+  }
+}
+
+/** Grid disable: whether it is ready, how long until it is, and whether this network's shields are down. */
+function drawGridReadout(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, x: number): void {
+  const c = cfg.colors;
+  const ready = gridDisableReady(state);
+  const cooling = Math.ceil(state.gridReadyAt - state.time);
+  drawText(ctx, "SELECTED", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
+  drawText(ctx, VERB_LABELS.gridDisable, x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
+  drawText(ctx, ready ? "READY" : `COOLING DOWN ${cooling}`, x + 14, PANEL_TOP + 204, 13, ready ? c.energy : c.panelDim, 1, "monospace", "left");
+  if (isSuppressed(state, state.location)) {
+    const down = Math.ceil((state.suppressedUntil[state.location] ?? 0) - state.time);
+    drawText(ctx, `NETWORK POWER DOWN ${down}`, x + 14, PANEL_TOP + 222, 12, c.shield, 1, "monospace", "left");
+  } else if (ready) {
+    drawText(ctx, "SPACE TO CUT POWER HERE", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
   }
 }
 

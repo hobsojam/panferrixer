@@ -18,6 +18,8 @@ const flatWorld: World = {
   pickupRadius: config.dashboard.pickupRadius,
   blipRadius: config.dashboard.blipRadius,
   directionRadius: config.dashboard.directionRadius,
+  suppressionSeconds: config.dashboard.suppressionSeconds,
+  gridDisableCooldownSeconds: config.dashboard.gridDisableCooldownSeconds,
 };
 
 function step(state: DashboardState, actions: Action[], dt = DT, w: World = flatWorld): DashboardState {
