@@ -1,7 +1,7 @@
 import type { Config } from "./config";
 import { AVAILABLE_VERBS, VERB_GRID, isLow, selectedVerb, type DashboardState, type Verb } from "./dashboard";
 import { drawGlow } from "./render";
-import { NETWORK } from "./map";
+import { generateLocalMap, type LocalMap } from "./local-map";
 
 const VERB_LABELS: Record<Verb, string> = {
   move: "MOVE",
@@ -111,7 +111,7 @@ function drawDetailPanel(ctx: CanvasRenderingContext2D, state: DashboardState, c
   const available = AVAILABLE_VERBS.includes(verb);
 
   drawPanelFrame(ctx, x, PANEL_TOP, width, height, c.panelDim);
-  drawMiniMap(ctx, state, cfg, x + 8, PANEL_TOP + 8, width - 16, 118);
+  drawLocalMap(ctx, state, cfg, x + 8, PANEL_TOP + 8, width - 16, 118);
 
   ctx.strokeStyle = c.panelDim;
   ctx.lineWidth = 1;
@@ -138,11 +138,21 @@ function drawDetailPanel(ctx: CanvasRenderingContext2D, state: DashboardState, c
   }
 }
 
+let cachedLocal: { node: number; map: LocalMap } | null = null;
+
+/** The local patch for a node. Cached, since the same node is drawn every frame. */
+function localMapFor(node: number, cfg: Config): LocalMap {
+  if (!cachedLocal || cachedLocal.node !== node) {
+    cachedLocal = { node, map: generateLocalMap(node, cfg.localMap) };
+  }
+  return cachedLocal.map;
+}
+
 /**
- * The network graph: passes as lines, nodes as dots, and the robot's node marked
- * with a pulsing ring. Pure: the map layout comes from map.ts, the position from state.
+ * Local view: ground around the robot, with the robot fixed at the centre.
+ * Valleys are faint dots, ground is dots, high ground is filled.
  */
-function drawMiniMap(
+function drawLocalMap(
   ctx: CanvasRenderingContext2D,
   state: DashboardState,
   cfg: Config,
@@ -152,46 +162,49 @@ function drawMiniMap(
   h: number
 ): void {
   const c = cfg.colors;
-  const pad = 14;
-  const toX = (nx: number): number => x + pad + nx * (w - 2 * pad);
-  const toY = (ny: number): number => y + pad + ny * (h - 2 * pad);
+  const map = localMapFor(state.location, cfg);
+  const cellW = w / map.cols;
+  const cellH = h / map.rows;
 
-  ctx.strokeStyle = c.panelDim;
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (const [a, b] of NETWORK.links) {
-    ctx.moveTo(toX(NETWORK.nodes[a].x), toY(NETWORK.nodes[a].y));
-    ctx.lineTo(toX(NETWORK.nodes[b].x), toY(NETWORK.nodes[b].y));
-  }
-  ctx.stroke();
-
-  ctx.fillStyle = c.text;
-  NETWORK.nodes.forEach((node, index) => {
-    if (index === state.location) return;
-    ctx.globalAlpha = 0.5;
-    ctx.beginPath();
-    ctx.arc(toX(node.x), toY(node.y), 2.5, 0, Math.PI * 2);
-    ctx.fill();
-  });
+  map.tiers.forEach((row, r) =>
+    row.forEach((tier, col) => {
+      const cx = x + col * cellW;
+      const cy = y + r * cellH;
+      if (tier === 2) {
+        ctx.globalAlpha = 0.45;
+        ctx.fillStyle = c.panelDim;
+        ctx.fillRect(cx + 1, cy + 1, cellW - 2, cellH - 2);
+      } else {
+        ctx.globalAlpha = tier === 1 ? 0.3 : 0.12;
+        ctx.fillStyle = c.panelDim;
+        ctx.beginPath();
+        ctx.arc(cx + cellW / 2, cy + cellH / 2, 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    })
+  );
   ctx.globalAlpha = 1;
 
-  const here = NETWORK.nodes[state.location];
-  const cx = toX(here.x);
-  const cy = toY(here.y);
-  const pulse = 1.5 * Math.sin(state.time * 4);
+  // The robot is always at the centre cell; the ground moves around it.
+  const mx = x + w / 2;
+  const my = y + h / 2;
+  const pulse = 1.2 * Math.sin(state.time * 4);
   drawGlow(ctx, c.panelSelected, 6, () => {
     ctx.strokeStyle = c.panelSelected;
+    ctx.fillStyle = c.panelSelected;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(cx, cy, 6 + pulse, 0, Math.PI * 2);
+    ctx.arc(mx, my, 7 + pulse, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.fillStyle = c.panelSelected;
     ctx.beginPath();
-    ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+    ctx.moveTo(mx, my - 4);
+    ctx.lineTo(mx + 3, my + 3);
+    ctx.lineTo(mx - 3, my + 3);
+    ctx.closePath();
     ctx.fill();
   });
 
-  drawText(ctx, "NETWORK", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
+  drawText(ctx, "LOCAL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
 }
 
 /**

@@ -110,6 +110,16 @@ export const config = {
     startNode: 0, // index into the network map where the robot begins
   },
 
+  // Local view: a patch of ground around the robot, for the dashboard mini map (design-notes 2.7).
+  localMap: {
+    worldSeed: 7,
+    cols: 25,
+    rows: 11,
+    smoothingPasses: 2,
+    valleyBelow: 0.46,
+    highAbove: 0.54,
+  },
+
   colors: {
     background: "#000000", // sky
     frame: "#ffe066",
