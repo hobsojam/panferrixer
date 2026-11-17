@@ -108,6 +108,7 @@ export const config = {
     tracePoints: 120,
     formName: "PROTOTYPE", // placeholder for the robot form shown in the name bar
     startNode: 0, // index into the network map where the robot begins
+    targetRange: 6, // in local-map cells, Chebyshev distance from the cross
   },
 
   // Local view: a patch of ground around the robot, for the dashboard mini map (design-notes 2.7).
@@ -118,6 +119,7 @@ export const config = {
     smoothingPasses: 2,
     valleyBelow: 0.46,
     highAbove: 0.54,
+    targetsPerNode: 3,
   },
 
   colors: {

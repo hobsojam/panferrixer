@@ -7,6 +7,7 @@ const ACTION_KEYS: Record<string, Action> = {
   ArrowRight: "right",
   Enter: "activate",
   Space: "activate",
+  Escape: "cancel",
 };
 
 /**

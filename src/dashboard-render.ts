@@ -1,7 +1,7 @@
 import type { Config } from "./config";
-import { AVAILABLE_VERBS, VERB_GRID, isLow, selectedVerb, type DashboardState, type Verb } from "./dashboard";
+import { AVAILABLE_VERBS, VERB_GRID, isLow, selectedVerb, worldFor, type DashboardState, type TargetingWorld, type Verb } from "./dashboard";
+import type { Target } from "./local-map";
 import { drawGlow } from "./render";
-import { generateLocalMap, type LocalMap } from "./local-map";
 
 const VERB_LABELS: Record<Verb, string> = {
   move: "MOVE",
@@ -10,10 +10,18 @@ const VERB_LABELS: Record<Verb, string> = {
   gridDisable: "GRID DISABLE",
 };
 
+const TARGET_LABELS: Record<Target["kind"], string> = {
+  power: "POWER",
+  mine: "MINE",
+  beacon: "BEACON",
+  dome: "DOME",
+};
+
 /** Pure drawing: reads state and config, never mutates either. */
 export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config): void {
   const { width: w, height: h } = cfg.canvas;
   const c = cfg.colors;
+  const world = worldFor(state.location, cfg);
 
   ctx.fillStyle = c.background;
   ctx.fillRect(0, 0, w, h);
@@ -21,11 +29,13 @@ export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardS
   drawNameBar(ctx, cfg);
   drawTracePanel(ctx, state, cfg);
   drawVerbGrid(ctx, state, cfg);
-  drawDetailPanel(ctx, state, cfg);
+  drawSidePanel(ctx, state, world, cfg);
   drawGauge(ctx, "ENERGY", state.energyCells, cfg.dashboard.energyCells, 330, cfg, "cell", state.time);
   drawGauge(ctx, "SHIELDS", state.shieldPlates, cfg.dashboard.shieldPlates, 384, cfg, "plate", state.time);
 
-  drawText(ctx, "ARROWS SELECT     SPACE ACTIVATE", w / 2, h - 28, 14, c.text, 0.8, "monospace");
+  const hint =
+    state.mode === "targeting" ? "ARROWS MOVE CROSS     SPACE FIRE     ESC CANCEL" : "ARROWS SELECT     SPACE ACTIVATE";
+  drawText(ctx, hint, w / 2, h - 28, 14, c.text, 0.8, "monospace");
 
   ctx.strokeStyle = c.frame;
   ctx.lineWidth = 4;
@@ -102,16 +112,15 @@ function drawVerbGrid(ctx: CanvasRenderingContext2D, state: DashboardState, cfg:
   });
 }
 
-function drawDetailPanel(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config): void {
+/** The right-hand panel: the local view on top, and a readout beneath it that depends on the mode. */
+function drawSidePanel(ctx: CanvasRenderingContext2D, state: DashboardState, world: TargetingWorld, cfg: Config): void {
   const c = cfg.colors;
   const x = 700;
   const width = 240;
   const height = PANEL_BOTTOM - PANEL_TOP;
-  const verb = selectedVerb(state);
-  const available = AVAILABLE_VERBS.includes(verb);
 
   drawPanelFrame(ctx, x, PANEL_TOP, width, height, c.panelDim);
-  drawLocalMap(ctx, state, cfg, x + 8, PANEL_TOP + 8, width - 16, 118);
+  drawLocalMap(ctx, state, world, cfg, x + 8, PANEL_TOP + 8, width - 16, 118);
 
   ctx.strokeStyle = c.panelDim;
   ctx.lineWidth = 1;
@@ -120,6 +129,13 @@ function drawDetailPanel(ctx: CanvasRenderingContext2D, state: DashboardState, c
   ctx.lineTo(x + width - 8, PANEL_TOP + 140);
   ctx.stroke();
 
+  if (state.mode === "targeting") {
+    drawTargetingReadout(ctx, state, world, cfg, x);
+    return;
+  }
+
+  const verb = selectedVerb(state);
+  const available = AVAILABLE_VERBS.includes(verb);
   drawText(ctx, "SELECTED", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
   drawText(ctx, VERB_LABELS[verb], x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
   drawText(
@@ -138,23 +154,30 @@ function drawDetailPanel(ctx: CanvasRenderingContext2D, state: DashboardState, c
   }
 }
 
-let cachedLocal: { node: number; map: LocalMap } | null = null;
+function drawTargetingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, world: TargetingWorld, cfg: Config, x: number): void {
+  const c = cfg.colors;
+  const target = state.target === null ? null : world.targets[state.target];
 
-/** The local patch for a node. Cached, since the same node is drawn every frame. */
-function localMapFor(node: number, cfg: Config): LocalMap {
-  if (!cachedLocal || cachedLocal.node !== node) {
-    cachedLocal = { node, map: generateLocalMap(node, cfg.localMap) };
+  drawText(ctx, "TARGETING", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
+  if (target) {
+    drawText(ctx, TARGET_LABELS[target.kind], x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
+    drawText(ctx, "IN RANGE", x + 14, PANEL_TOP + 204, 13, c.energy, 1, "monospace", "left");
+    drawText(ctx, "SPACE TO FIRE", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
+  } else {
+    drawText(ctx, "NO TARGET IN RANGE", x + 14, PANEL_TOP + 180, 13, c.panelDim, 1, "monospace", "left");
+    drawText(ctx, "MOVE THE CROSS", x + 14, PANEL_TOP + 204, 12, c.text, 0.7, "monospace", "left");
   }
-  return cachedLocal.map;
 }
 
 /**
  * Local view: ground around the robot, with the robot fixed at the centre.
- * Valleys are faint dots, ground is dots, high ground is filled.
+ * Valleys are faint dots, ground is dots, high ground is filled. While targeting,
+ * the targets are marked and the cross shows where the pointer is.
  */
 function drawLocalMap(
   ctx: CanvasRenderingContext2D,
   state: DashboardState,
+  world: TargetingWorld,
   cfg: Config,
   x: number,
   y: number,
@@ -162,9 +185,10 @@ function drawLocalMap(
   h: number
 ): void {
   const c = cfg.colors;
-  const map = localMapFor(state.location, cfg);
+  const map = world.map;
   const cellW = w / map.cols;
   const cellH = h / map.rows;
+  const cellCentre = (col: number, row: number): [number, number] => [x + (col + 0.5) * cellW, y + (row + 0.5) * cellH];
 
   map.tiers.forEach((row, r) =>
     row.forEach((tier, col) => {
@@ -184,6 +208,32 @@ function drawLocalMap(
     })
   );
   ctx.globalAlpha = 1;
+
+  if (state.mode === "targeting") {
+    world.targets.forEach((t, index) => {
+      const [tx, ty] = cellCentre(t.col, t.row);
+      const inRange = state.target === index;
+      drawGlow(ctx, c.panelSelected, inRange ? 6 : 0, () => {
+        ctx.strokeStyle = inRange ? c.panelSelected : c.text;
+        ctx.lineWidth = 1.2;
+        ctx.globalAlpha = inRange ? 1 : 0.6;
+        ctx.strokeRect(tx - 3, ty - 3, 6, 6);
+      });
+    });
+    ctx.globalAlpha = 1;
+
+    const [cx, cy] = cellCentre(state.cross.col, state.cross.row);
+    drawGlow(ctx, c.panelSelected, 4, () => {
+      ctx.strokeStyle = c.panelSelected;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(cx - 5, cy);
+      ctx.lineTo(cx + 5, cy);
+      ctx.moveTo(cx, cy - 5);
+      ctx.lineTo(cx, cy + 5);
+      ctx.stroke();
+    });
+  }
 
   // The robot is always at the centre cell; the ground moves around it.
   const mx = x + w / 2;
@@ -252,14 +302,7 @@ function drawGauge(
   ctx.globalAlpha = 1;
 }
 
-function traceUnit(
-  ctx: CanvasRenderingContext2D,
-  shape: "cell" | "plate",
-  x: number,
-  y: number,
-  w: number,
-  h: number
-): void {
+function traceUnit(ctx: CanvasRenderingContext2D, shape: "cell" | "plate", x: number, y: number, w: number, h: number): void {
   ctx.beginPath();
   if (shape === "cell") {
     ctx.rect(x, y, w, h);
@@ -279,14 +322,7 @@ function drawPanelFrame(ctx: CanvasRenderingContext2D, x: number, y: number, w: 
   ctx.strokeRect(x, y, w, h);
 }
 
-function drawVerbIcon(
-  ctx: CanvasRenderingContext2D,
-  verb: Verb,
-  cx: number,
-  cy: number,
-  size: number,
-  color: string
-): void {
+function drawVerbIcon(ctx: CanvasRenderingContext2D, verb: Verb, cx: number, cy: number, size: number, color: string): void {
   const half = size / 2;
   drawGlow(ctx, color, 6, () => {
     ctx.strokeStyle = color;

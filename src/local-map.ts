@@ -10,6 +10,7 @@ export interface LocalMapConfig {
   smoothingPasses: number;
   valleyBelow: number; // raw height below this is a valley
   highAbove: number; // raw height above this is high ground
+  targetsPerNode: number;
 }
 
 export interface LocalMap {
@@ -56,4 +57,33 @@ function smooth(grid: number[][]): number[][] {
       return sum / count;
     })
   );
+}
+
+/** Placeholder target kinds named in design-notes 2.8. Their art is not designed yet. */
+export type TargetKind = "power" | "mine" | "beacon" | "dome";
+
+export interface Target {
+  col: number;
+  row: number;
+  kind: TargetKind;
+}
+
+const TARGET_KINDS: readonly TargetKind[] = ["power", "mine", "beacon", "dome"];
+
+/**
+ * Placeholder targets on a node's patch: on ground or high ground, never in a valley,
+ * and distinct cells. Deterministic from the world seed and node.
+ */
+export function targetsFor(node: number, map: LocalMap, cfg: LocalMapConfig): Target[] {
+  const rng = createRng(cfg.worldSeed * 6151 + node * 2111 + 1);
+  const targets: Target[] = [];
+  for (let attempt = 0; attempt < 500 && targets.length < cfg.targetsPerNode; attempt++) {
+    const row = Math.floor(rng() * map.rows);
+    const col = Math.floor(rng() * map.cols);
+    if (map.tiers[row][col] === 0) continue;
+    if (targets.some((t) => t.row === row && t.col === col)) continue;
+    const kind = TARGET_KINDS[Math.floor(rng() * TARGET_KINDS.length)];
+    targets.push({ col, row, kind });
+  }
+  return targets;
 }

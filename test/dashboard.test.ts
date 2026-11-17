@@ -1,66 +1,100 @@
 import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
-import { createDashboardState, isLow, selectedVerb, stepDashboard } from "../src/dashboard";
+import { createDashboardState, isLow, nearestTarget, selectedVerb, stepDashboard, worldFor, type Action, type DashboardState } from "../src/dashboard";
 
 const DT = 1 / 60;
+const world = worldFor(config.dashboard.startNode, config);
+
+function step(state: DashboardState, actions: Action[]) {
+  return stepDashboard(state, actions, DT, world);
+}
+
+/** A dashboard already in targeting mode with the cross on the given target. */
+function targetingOn(index: number): DashboardState {
+  const t = world.targets[index];
+  return { ...createDashboardState(config), mode: "targeting", cross: { col: t.col, row: t.row }, target: index };
+}
 
 describe("dashboard selection", () => {
-  it("starts on the top-left verb", () => {
-    expect(selectedVerb(createDashboardState(config))).toBe("move");
+  it("starts on the top-left verb in browse mode", () => {
+    const s = createDashboardState(config);
+    expect(selectedVerb(s)).toBe("move");
+    expect(s.mode).toBe("browse");
   });
 
-  it("moves through the 2x2 grid with the arrow keys", () => {
-    let state = createDashboardState(config);
-
-    state = stepDashboard(state, ["right"], DT).state;
-    expect(selectedVerb(state)).toBe("scan");
-
-    state = stepDashboard(state, ["down"], DT).state;
-    expect(selectedVerb(state)).toBe("gridDisable");
-
-    state = stepDashboard(state, ["left"], DT).state;
-    expect(selectedVerb(state)).toBe("missile");
-  });
-
-  it("clamps at the edges of the grid rather than wrapping", () => {
-    let state = createDashboardState(config);
-
-    state = stepDashboard(state, ["up", "left"], DT).state;
-    expect(selectedVerb(state)).toBe("move");
-
-    state = stepDashboard(state, ["down", "down", "right", "right"], DT).state;
-    expect(selectedVerb(state)).toBe("gridDisable");
+  it("moves through the 2x2 grid and clamps at the edges", () => {
+    let s = createDashboardState(config);
+    s = step(s, ["right"]).state;
+    expect(selectedVerb(s)).toBe("scan");
+    s = step(s, ["down", "down", "left", "left"]).state;
+    expect(selectedVerb(s)).toBe("missile");
   });
 });
 
-describe("dashboard activation", () => {
-  it("requests a missile only when the missile verb is selected", () => {
-    const onMissile = stepDashboard(
-      { ...createDashboardState(config), row: 1, col: 0 },
-      ["activate"],
-      DT
-    );
-    expect(onMissile.launchMissile).toBe(true);
+describe("entering targeting", () => {
+  it("activating Missile enters targeting with the cross at the centre", () => {
+    const s = { ...createDashboardState(config), row: 1, col: 0 };
+    const next = step(s, ["activate"]).state;
 
-    const onMove = stepDashboard(createDashboardState(config), ["activate"], DT);
-    expect(onMove.launchMissile).toBe(false);
+    expect(next.mode).toBe("targeting");
+    expect(next.cross).toEqual({ col: Math.floor(world.map.cols / 2), row: Math.floor(world.map.rows / 2) });
   });
 
-  it("does nothing for verbs that are not yet built", () => {
-    const onScan = stepDashboard({ ...createDashboardState(config), row: 0, col: 1 }, ["activate"], DT);
-    const onGrid = stepDashboard({ ...createDashboardState(config), row: 1, col: 1 }, ["activate"], DT);
-
-    expect(onScan.launchMissile).toBe(false);
-    expect(onGrid.launchMissile).toBe(false);
-  });
-
-  it("advances its own clock so the state trace can move", () => {
-    const step = stepDashboard(createDashboardState(config), [], DT);
-    expect(step.state.time).toBeCloseTo(DT);
+  it("activating a verb that is not built does nothing", () => {
+    expect(step(createDashboardState(config), ["activate"]).state.mode).toBe("browse");
+    const onGrid = { ...createDashboardState(config), row: 1, col: 1 };
+    expect(step(onGrid, ["activate"]).state.mode).toBe("browse");
   });
 });
 
-describe("low state", () => {
+describe("targeting", () => {
+  it("moving the cross one step moves it by one cell and keeps the target in range", () => {
+    const start = targetingOn(0);
+    const next = step(start, ["right"]).state;
+    expect(next.cross.col).toBe(Math.min(world.map.cols - 1, start.cross.col + 1));
+    expect(next.target).not.toBeNull();
+  });
+
+  it("the cross cannot leave the local map", () => {
+    let s = targetingOn(0);
+    for (let i = 0; i < world.map.cols + 5; i++) s = step(s, ["right"]).state;
+    expect(s.cross.col).toBe(world.map.cols - 1);
+  });
+
+  it("activating with a target in range fires that target", () => {
+    const result = step(targetingOn(1), ["activate"]);
+    expect(result.fire).toEqual(world.targets[1]);
+  });
+
+  it("activating with no target in range fires nothing", () => {
+    const empty = { ...targetingOn(0), target: null };
+    expect(step(empty, ["activate"]).fire).toBeNull();
+  });
+
+  it("cancel returns to browsing and drops the target", () => {
+    const next = step(targetingOn(0), ["cancel"]).state;
+    expect(next.mode).toBe("browse");
+    expect(next.target).toBeNull();
+  });
+});
+
+describe("nearestTarget", () => {
+  it("returns null when every target is out of range", () => {
+    const farCorner = { col: -100, row: -100 };
+    expect(nearestTarget(farCorner, world)).toBeNull();
+  });
+
+  it("returns the index of a target the cross is on", () => {
+    const t = world.targets[2];
+    expect(nearestTarget({ col: t.col, row: t.row }, world)).toBe(2);
+  });
+});
+
+describe("dashboard clock and low state", () => {
+  it("advances its clock so the state trace can move", () => {
+    expect(step(createDashboardState(config), []).state.time).toBeCloseTo(DT);
+  });
+
   it("is low at and below the threshold, and not above it", () => {
     const threshold = config.dashboard.lowThreshold;
     expect(isLow(threshold, config)).toBe(true);
