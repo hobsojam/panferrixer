@@ -40,6 +40,7 @@ export interface Target {
   row: number;
   kind: TargetKind;
   hasDrop: boolean; // the drop is hidden under the building; found only once it is destroyed
+  network: number; // the town (network) it was placed in. Towns can overlap, so position alone does not say
 }
 
 export interface World {
@@ -180,7 +181,8 @@ function cheapestPath(map: LocalMap, sources: Cell[], isGoal: (x: number, y: num
 function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target[] {
   const rng = createRng(cfg.worldSeed * 6151 + 1);
   const targets: Target[] = [];
-  for (const town of towns) {
+  for (let network = 0; network < towns.length; network++) {
+    const town = towns[network];
     let placed = 0;
     for (let attempt = 0; attempt < 500 && placed < cfg.targetsPerTown; attempt++) {
       const col = town.x + Math.round((rng() * 2 - 1) * cfg.townRadiusCols);
@@ -191,7 +193,7 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
       // Each network has one power station, placed first. It is never a drop: it cannot be destroyed.
       const kind = placed === 0 ? "power" : TARGET_KINDS[Math.floor(rng() * TARGET_KINDS.length)];
       const hasDrop = rng() < cfg.dropChance && kind !== "power";
-      targets.push({ col, row, kind, hasDrop });
+      targets.push({ col, row, kind, hasDrop, network });
       placed += 1;
     }
   }

@@ -47,7 +47,7 @@ describe("dashboard sounds", () => {
   it("a scan sound that depends on what was found", () => {
     const near = { ...createDashboardState(config), ruins: [0], pos: { x: 5, y: 5 }, col: 1 };
     const withDrop = { ...near, scan: null };
-    const world2 = { ...world, targets: [{ col: 5, row: 7, kind: "dome" as const, hasDrop: true }] };
+    const world2 = { ...world, targets: [{ col: 5, row: 7, kind: "dome" as const, hasDrop: true, network: 0 }] };
     const after = stepDashboard({ ...withDrop, ruins: [0] }, ["activate"], DT, { ...world2, range: 2 });
     expect(after.state.scan).toEqual({ kind: "signal", bearing: "S", close: true });
     expect(eventsBetween(dash(withDrop), dash({ ...withDrop, scan: after.state.scan }), config)).toEqual(["scanNear"]);

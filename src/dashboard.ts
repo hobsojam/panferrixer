@@ -127,9 +127,9 @@ export function createDashboardState(cfg: Config): DashboardState {
   };
 }
 
-/** The network a target belongs to: the town it stands in. */
-export function networkOf(target: Target, world: World): number {
-  return world.towns.findIndex((t) => inTown(t, world.townRadiusCols, world.townRadiusRows, target.col, target.row));
+/** The network a target belongs to: the town it was placed in. */
+export function networkOf(target: Target): number {
+  return target.network;
 }
 
 /** True while a network's shields are down. */
@@ -142,9 +142,9 @@ export function isSuppressed(state: DashboardState, network: number): boolean {
  * the network is powered deflects, and one fired while it is suppressed destroys the
  * building even if the window closes during its flight. A power station has no shield.
  */
-export function isShielded(state: DashboardState, target: Target, world: World): boolean {
+export function isShielded(state: DashboardState, target: Target): boolean {
   if (target.kind === "power") return false;
-  return !isSuppressed(state, networkOf(target, world));
+  return !isSuppressed(state, networkOf(target));
 }
 
 /** Takes a network's shields down for the window, starting now. The window is never shortened. */
