@@ -178,7 +178,11 @@ Very high scores (for example 96% in one Spectrum review). Praise: depth, the wi
 **One target per flight:** keep the flight abstract. Fiction fix: the missile is a seeker locked to one designated signature, and a miss means overshoot and loss of lock. Rejected for now: showing several objects in the terminal phase (readability, tuning cost, flight-sim creep). Optional later: splash damage, and near-miss feedback.
 
 ### 4.2 Scanner redesign
-Manual and author agree on how the original works: the scanner is used after destroying a dome, standing in the ruins, and anything it shows is picked up automatically. The proposal gives it a different job:
+Manual and author agree on how the original works: the scanner is used after destroying a dome, standing in the ruins, and anything it shows is picked up automatically.
+
+**Decided [Author-direction]:** nothing about a building's contents can be found before it is destroyed. Drops and parts are only findable after the building is gone, either lying where the missile hit or uncovered when the building falls. Scanning in advance is not allowed, so the unknown contents are part of the loot-box pull. The rest of this section is the earlier proposal, which assumed some pre-fire scanning and needs revising to match.
+
+The proposal gives it a different job:
 - A ping with a radius, shown on the map, with the radius as an upgrade stat.
 - Graded information: close signals clear, distant ones a faint blip with rough direction.
 - A pacing cost: a cooldown or a small drain on the batteries.
