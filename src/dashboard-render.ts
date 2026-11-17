@@ -1,6 +1,6 @@
 import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
-import { AVAILABLE_VERBS, VERB_GRID, isLow, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
+import { AVAILABLE_VERBS, VERB_GRID, gridDisableReady, isLow, isSuppressed, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
 import { drawGlow } from "./render";
 import { findRoute } from "./route";
@@ -20,7 +20,7 @@ const TARGET_LABELS: Record<Target["kind"], string> = {
 };
 
 /** Pure drawing: reads state and config, never mutates either. */
-export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config): void {
+export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, soundOn: boolean = true): void {
   const { width: w, height: h } = cfg.canvas;
   const c = cfg.colors;
   const world = worldFor(cfg);
@@ -35,17 +35,19 @@ export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardS
   drawGauge(ctx, "ENERGY", state.energyCells, cfg.dashboard.energyCells, 330, cfg, "cell", state.time);
   drawGauge(ctx, "SHIELDS", state.shieldPlates, cfg.dashboard.shieldPlates, 384, cfg, "plate", state.time);
 
-  drawText(ctx, hintFor(state), w / 2, h - 28, 14, c.text, 0.8, "monospace");
+  drawText(ctx, hintFor(state, soundOn), w / 2, h - 28, 14, c.text, 0.8, "monospace");
 
   ctx.strokeStyle = c.frame;
   ctx.lineWidth = 4;
   ctx.strokeRect(2, 2, w - 4, h - 4);
 }
 
-function hintFor(state: DashboardState): string {
-  if (state.mode === "targeting") return "ARROWS MOVE CROSS     SPACE FIRE     ESC CANCEL";
+function hintFor(state: DashboardState, soundOn: boolean): string {
+  if (state.mode === "targeting") {
+    return state.purpose === "gridDisable" ? "ARROWS MOVE CROSS     SPACE CUT POWER     ESC CANCEL" : "ARROWS MOVE CROSS     SPACE FIRE     ESC CANCEL";
+  }
   if (state.mode === "moving") return "ARROWS MOVE POINT     SPACE WALK HERE     ESC CANCEL";
-  return "ARROWS SELECT     SPACE ACTIVATE";
+  return `ARROWS SELECT     SPACE ACTIVATE     M SOUND ${soundOn ? "ON" : "OFF"}`;
 }
 
 const PANEL_TOP = 70;
@@ -163,6 +165,10 @@ function drawSelectedReadout(ctx: CanvasRenderingContext2D, state: DashboardStat
     drawScanReadout(ctx, state, cfg, x);
     return;
   }
+  if (verb === "gridDisable") {
+    drawGridReadout(ctx, state, cfg, x);
+    return;
+  }
   const available = AVAILABLE_VERBS.includes(verb);
   drawText(ctx, "SELECTED", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
   drawText(ctx, VERB_LABELS[verb], x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
@@ -180,6 +186,22 @@ function drawSelectedReadout(ctx: CanvasRenderingContext2D, state: DashboardStat
   if (available) {
     const prompt = verb === "move" ? "SPACE TO CHOOSE A POINT" : "SPACE TO FIRE";
     drawText(ctx, prompt, x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
+  }
+}
+
+/** Grid disable: whether it is ready, how long until it is, and whether this network's shields are down. */
+function drawGridReadout(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, x: number): void {
+  const c = cfg.colors;
+  const ready = gridDisableReady(state);
+  const cooling = Math.ceil(state.gridReadyAt - state.time);
+  drawText(ctx, "SELECTED", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
+  drawText(ctx, VERB_LABELS.gridDisable, x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
+  drawText(ctx, ready ? "READY" : `COOLING DOWN ${cooling}`, x + 14, PANEL_TOP + 204, 13, ready ? c.energy : c.panelDim, 1, "monospace", "left");
+  if (isSuppressed(state, state.location)) {
+    const down = Math.ceil((state.suppressedUntil[state.location] ?? 0) - state.time);
+    drawText(ctx, `NETWORK POWER DOWN ${down}`, x + 14, PANEL_TOP + 222, 12, c.shield, 1, "monospace", "left");
+  } else if (ready) {
+    drawText(ctx, "SPACE TO CHOOSE A POWER STATION", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
   }
 }
 
@@ -211,9 +233,9 @@ function drawTargetingReadout(ctx: CanvasRenderingContext2D, state: DashboardSta
   if (target) {
     drawText(ctx, TARGET_LABELS[target.kind], x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
     drawText(ctx, "IN RANGE", x + 14, PANEL_TOP + 204, 13, c.energy, 1, "monospace", "left");
-    drawText(ctx, "SPACE TO FIRE", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
+    drawText(ctx, state.purpose === "gridDisable" ? "SPACE TO CUT POWER" : "SPACE TO FIRE", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
   } else {
-    drawText(ctx, "NO TARGET IN RANGE", x + 14, PANEL_TOP + 180, 13, c.panelDim, 1, "monospace", "left");
+    drawText(ctx, state.purpose === "gridDisable" ? "NO POWER STATION IN RANGE" : "NO TARGET IN RANGE", x + 14, PANEL_TOP + 180, 13, c.panelDim, 1, "monospace", "left");
     drawText(ctx, "MOVE THE CROSS", x + 14, PANEL_TOP + 204, 12, c.text, 0.7, "monospace", "left");
   }
 }
@@ -311,10 +333,45 @@ function drawLocalMap(
     });
   }
 
+  // The ring is centred on the robot, which sits in the middle of the local view.
+  drawPulse(ctx, state, world, cfg, x + w / 2, y + h / 2, world.directionRadius * cellW, world.directionRadius * cellH, [x, y, w, h]);
   drawRobot(ctx, x + w / 2, y + h / 2, state.time, c.panelSelected);
   ctx.restore();
 
   drawText(ctx, "LOCAL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
+}
+
+/**
+ * The ring from a scan: it grows out from the robot to the scan's reach and fades as it goes.
+ * Clipped to the panel, so in the local view it is cut off at the edge.
+ */
+function drawPulse(
+  ctx: CanvasRenderingContext2D,
+  state: DashboardState,
+  world: World,
+  cfg: Config,
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  rect: [number, number, number, number]
+): void {
+  if (state.pulseStarted === null) return;
+  const t = state.time - state.pulseStarted;
+  if (t < 0 || t >= world.scanPulseSeconds) return;
+  const k = t / world.scanPulseSeconds;
+  const grown = 1 - (1 - k) ** 2;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rect[0], rect[1], rect[2], rect[3]);
+  ctx.clip();
+  ctx.globalAlpha = 1 - k;
+  ctx.strokeStyle = cfg.colors.panelSelected;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx * grown, ry * grown, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
 }
 
 /**
@@ -379,6 +436,7 @@ function drawFullMap(
   }
 
   const [rx, ry] = toScreen(state.pos.x, state.pos.y);
+  drawPulse(ctx, state, world, cfg, rx, ry, world.directionRadius * cellW, world.directionRadius * cellH, [x, y, w, h]);
   drawRobot(ctx, rx, ry, state.time, c.panelSelected);
 
   drawText(ctx, "FULL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");

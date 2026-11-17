@@ -1,5 +1,6 @@
 import type { Config } from "./config";
 import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
+import { drawDust, drawExplosion } from "./explosion";
 import type { TargetKind } from "./local-map";
 import type { FlightState } from "./types";
 
@@ -7,7 +8,13 @@ import type { FlightState } from "./types";
 const OVERSCAN = 0.35;
 
 /** Pure drawing: reads state and config, never mutates either. */
-export function render(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config, targetKind: TargetKind | null = null): void {
+export function render(
+  ctx: CanvasRenderingContext2D,
+  state: FlightState,
+  cfg: Config,
+  targetKind: TargetKind | null = null,
+  shielded: boolean = false
+): void {
   const { width: w, height: h } = cfg.canvas;
   const horizonY = h * 0.55;
 
@@ -32,11 +39,11 @@ export function render(ctx: CanvasRenderingContext2D, state: FlightState, cfg: C
   }
 
   if (state.phase === "terminal" || state.phase === "hit") {
-    drawTarget(ctx, state, cfg, horizonY, targetKind);
+    drawTarget(ctx, state, cfg, horizonY, targetKind, shielded);
   }
 
   if (state.phase === "hit") {
-    drawHitBurst(ctx, state, cfg, horizonY);
+    drawHitBurst(ctx, state, cfg, horizonY, shielded);
   }
 
   if (state.phase === "crash") {
@@ -47,6 +54,10 @@ export function render(ctx: CanvasRenderingContext2D, state: FlightState, cfg: C
 
   if (state.phase === "miss") {
     drawText(ctx, "MISSED", w / 2, h / 2, 48, cfg.colors.text, Math.min(1, state.resultElapsed * 2));
+  }
+
+  if (state.phase === "hit" && shielded) {
+    drawText(ctx, "DEFLECTED", w / 2, h / 2, 48, cfg.colors.shield, Math.min(1, state.resultElapsed * 2));
   }
 
   drawMarker(ctx, state, cfg);
@@ -147,12 +158,46 @@ function targetAnchor(state: FlightState, cfg: Config, horizonY: number): { cent
   };
 }
 
-function drawTarget(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config, horizonY: number, kind: TargetKind | null): void {
+/** A faint ring over a shielded building. On a deflected hit it flashes and fades out. */
+function drawShieldRing(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, color: string, alpha: number): void {
+  if (alpha <= 0) return;
+  drawGlow(ctx, color, 6, () => {
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, size * 0.6, size * 0.5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawTarget(
+  ctx: CanvasRenderingContext2D,
+  state: FlightState,
+  cfg: Config,
+  horizonY: number,
+  kind: TargetKind | null,
+  shielded: boolean
+): void {
   const { centerX, centerY, size } = targetAnchor(state, cfg, horizonY);
+  // A deflected hit leaves the building standing, so only an unshielded hit makes it collapse.
+  const collapsing = state.phase === "hit" && !shielded;
+  if (shielded) {
+    const ringAlpha = state.phase === "hit" ? clamp(1 - state.resultElapsed / 0.6, 0, 0.5) : 0.35;
+    drawShieldRing(ctx, centerX, centerY, size, cfg.colors.shield, ringAlpha);
+  }
 
   if (kind && hasArt(kind)) {
     // Terminal phase: the chosen building is drawn in full detail, standing on the ground (base at the horizon).
-    strokeArt(ctx, BUILDING_ART[kind]!.full, centerX, horizonY, size / 2, cfg.colors.target, 2, 8);
+    // On an unshielded hit it shakes and fades while the blast runs, so it reads as collapsing.
+    const hit = collapsing ? state.resultElapsed : null;
+    const fade = hit === null ? 1 : clamp(1 - hit / 0.8, 0, 1);
+    const shake = hit === null || hit > 0.3 ? 0 : Math.sin(hit * 80) * size * 0.02;
+    ctx.save();
+    ctx.globalAlpha = fade;
+    strokeArt(ctx, BUILDING_ART[kind]!.full, centerX + shake, horizonY, size / 2, cfg.colors.target, 2, 8);
+    ctx.restore();
     return;
   }
 
@@ -176,62 +221,22 @@ function drawTarget(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Conf
   });
 }
 
-function drawHitBurst(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config, horizonY: number): void {
+/** A missile hit on the building: the blast is centred on it, sized to it. */
+function drawHitBurst(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config, horizonY: number, shielded: boolean): void {
   const { centerX, centerY, size } = targetAnchor(state, cfg, horizonY);
-  const t = state.resultElapsed;
-  const rayCount = 12;
-  const inner = size * 0.35;
-  const outer = inner + Math.min(300, 40 + t * 340);
-  const alpha = clamp(1 - t * 0.6, 0.15, 1);
-
-  drawGlow(ctx, cfg.colors.hit, 10, () => {
-    ctx.strokeStyle = cfg.colors.hit;
-    ctx.globalAlpha = alpha;
-    ctx.lineWidth = 3;
-    for (let i = 0; i < rayCount; i++) {
-      const angle = (i / rayCount) * Math.PI * 2;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      ctx.beginPath();
-      ctx.moveTo(centerX + cos * inner, centerY + sin * inner * 0.7);
-      ctx.lineTo(centerX + cos * outer, centerY + sin * outer * 0.7);
-      ctx.stroke();
-    }
-
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.ellipse(centerX, centerY, outer * 0.75, outer * 0.52, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  });
+  // A deflected missile bursts on the shield, in the shield's colour, rather than on the building.
+  const color = shielded ? cfg.colors.shield : cfg.colors.hit;
+  drawExplosion(ctx, centerX, centerY, size * 0.6, state.resultElapsed, color, cfg.colors.text, state.seed);
 }
 
+/** A missile crash into terrain: a blast with dust, centred on the view. */
 function drawCrash(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config): void {
   const { width: w, height: h } = cfg.canvas;
   const centerX = w / 2;
   const centerY = h * 0.5;
-  const t = state.resultElapsed;
-  const spikeCount = 14;
-  const baseRadius = Math.min(220, 20 + t * 260);
-  const alpha = clamp(1 - t * 0.5, 0.2, 1);
-
-  drawGlow(ctx, cfg.colors.crash, 12, () => {
-    ctx.strokeStyle = cfg.colors.crash;
-    ctx.globalAlpha = alpha;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    for (let i = 0; i <= spikeCount; i++) {
-      const angle = (i / spikeCount) * Math.PI * 2;
-      const jag = i % 2 === 0 ? baseRadius : baseRadius * 0.5;
-      const x = centerX + Math.cos(angle) * jag;
-      const y = centerY + Math.sin(angle) * jag;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  });
+  const radius = 110;
+  drawDust(ctx, centerX, centerY, radius, state.resultElapsed, cfg.colors.mountain, state.seed);
+  drawExplosion(ctx, centerX, centerY, radius, state.resultElapsed, cfg.colors.crash, cfg.colors.text, state.seed);
 }
 
 function drawMarker(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config): void {

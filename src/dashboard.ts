@@ -2,7 +2,7 @@ import type { Config } from "./config";
 import { generateWorld, inTown, townCentres, type LocalMap, type Target, type Town } from "./local-map";
 import { findRoute } from "./route";
 
-/** The four verbs from design-notes 4.6. Missile and Move work; scan and grid disable do not yet. */
+/** The four verbs from design-notes 4.6. All four work. */
 export type Verb = "move" | "scan" | "missile" | "gridDisable";
 
 export type Action = "up" | "down" | "left" | "right" | "activate" | "cancel";
@@ -13,7 +13,7 @@ export const VERB_GRID: readonly (readonly Verb[])[] = [
   ["missile", "gridDisable"],
 ];
 
-export const AVAILABLE_VERBS: readonly Verb[] = ["move", "scan", "missile"];
+export const AVAILABLE_VERBS: readonly Verb[] = ["move", "scan", "missile", "gridDisable"];
 
 /** Eight compass points, north first, clockwise. */
 export const BEARINGS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
@@ -47,6 +47,9 @@ export interface World {
   pickupRadius: number; // a drop within this many cells is collected automatically
   blipRadius: number; // a scan within this many cells is marked close
   directionRadius: number; // a scan within this many cells gives a bearing
+  suppressionSeconds: number; // how long a network's shields stay down once opened
+  gridDisableCooldownSeconds: number; // time before grid disable can be used again
+  scanPulseSeconds: number; // how long a scan's ring takes to reach its full radius
 }
 
 export interface DashboardState {
@@ -66,6 +69,13 @@ export interface DashboardState {
   ruins: number[]; // indices of targets destroyed by a missile
   found: number[]; // indices of ruins whose drop the robot has collected
   scan: ScanResult | null; // the last scan, shown until the next one
+  // Network power: for each network (town index), the dashboard time at which its shields come back.
+  // A network is suppressed while its time is ahead of the clock.
+  suppressedUntil: Record<number, number>;
+  gridReadyAt: number; // dashboard time at which grid disable can be used again
+  pulseStarted: number | null; // dashboard time of the last scan, for the ring drawn on the mini map
+  // What the cross is choosing for: a missile target (any building), or a power station to cut.
+  purpose: "missile" | "gridDisable";
 }
 
 export interface DashboardStep {
@@ -90,6 +100,9 @@ export function worldFor(cfg: Config): World {
       pickupRadius: cfg.dashboard.pickupRadius,
       blipRadius: cfg.dashboard.blipRadius,
       directionRadius: cfg.dashboard.directionRadius,
+      suppressionSeconds: cfg.dashboard.suppressionSeconds,
+      gridDisableCooldownSeconds: cfg.dashboard.gridDisableCooldownSeconds,
+      scanPulseSeconds: cfg.dashboard.scanPulseSeconds,
     };
   }
   return cachedWorld;
@@ -114,7 +127,42 @@ export function createDashboardState(cfg: Config): DashboardState {
     ruins: [],
     found: [],
     scan: null,
+    suppressedUntil: {},
+    gridReadyAt: 0,
+    pulseStarted: null,
+    purpose: "missile",
   };
+}
+
+/** The network a target belongs to: the town it was placed in. */
+export function networkOf(target: Target): number {
+  return target.network;
+}
+
+/** True while a network's shields are down. */
+export function isSuppressed(state: DashboardState, network: number): boolean {
+  return (state.suppressedUntil[network] ?? 0) > state.time;
+}
+
+/**
+ * Whether a missile fired now meets shields. Checked at launch: a missile fired while
+ * the network is powered deflects, and one fired while it is suppressed destroys the
+ * building even if the window closes during its flight. A power station has no shield.
+ */
+export function isShielded(state: DashboardState, target: Target): boolean {
+  if (target.kind === "power") return false;
+  return !isSuppressed(state, networkOf(target));
+}
+
+/** Takes a network's shields down for the window, starting now. The window is never shortened. */
+export function openWindow(state: DashboardState, network: number, world: World): DashboardState {
+  const until = state.time + world.suppressionSeconds;
+  return { ...state, suppressedUntil: { ...state.suppressedUntil, [network]: Math.max(until, state.suppressedUntil[network] ?? 0) } };
+}
+
+/** Grid disable is ready once its cooldown has passed. */
+export function gridDisableReady(state: DashboardState): boolean {
+  return state.time >= state.gridReadyAt;
 }
 
 /** Records a destroyed target as a ruin. Called when a missile hit returns the player to the dashboard. */
@@ -145,7 +193,14 @@ export function stepDashboard(state: DashboardState, actions: readonly Action[],
     } else if (action === "cancel") {
       s = { ...s, mode: "browse", target: null };
     } else if (action === "activate") {
-      if (s.target !== null) fire = world.targets[s.target];
+      if (s.target !== null && s.purpose === "gridDisable") {
+        // Cutting power at a station takes down its network's shields, then starts the cooldown.
+        const station = world.targets[s.target];
+        const opened = openWindow(s, networkOf(station), world);
+        s = { ...opened, mode: "browse", target: null, gridReadyAt: s.time + world.gridDisableCooldownSeconds };
+      } else if (s.target !== null) {
+        fire = world.targets[s.target];
+      }
     } else {
       s = moveCross(s, action, world);
     }
@@ -203,13 +258,18 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
     const verb = selectedVerb(s);
     if (verb === "missile") {
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
-      return { ...s, mode: "targeting", cross, target: nearestTarget(cross, world) };
+      return { ...s, mode: "targeting", purpose: "missile", cross, target: nearestTarget(cross, world, anyTarget) };
     }
     if (verb === "move") {
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
       return { ...s, mode: "moving", cross };
     }
-    if (verb === "scan") return { ...s, scan: scanFrom(s, world) };
+    if (verb === "scan") return { ...s, scan: scanFrom(s, world), pulseStarted: s.time };
+    if (verb === "gridDisable" && gridDisableReady(s)) {
+      // Choose a power station with the cross, the same way as a missile target.
+      const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
+      return { ...s, mode: "targeting", purpose: "gridDisable", cross, target: nearestTarget(cross, world, isPowerStation) };
+    }
   }
   return s;
 }
@@ -278,14 +338,24 @@ function shiftCross(cross: Cross, action: Action, world: World): Cross {
 
 function moveCross(s: DashboardState, action: Action, world: World): DashboardState {
   const cross = shiftCross(s.cross, action, world);
-  return { ...s, cross, target: nearestTarget(cross, world) };
+  const filter = s.purpose === "gridDisable" ? isPowerStation : anyTarget;
+  return { ...s, cross, target: nearestTarget(cross, world, filter) };
 }
 
-/** The target closest to the cross within range; ties go to the earlier target. */
-export function nearestTarget(cross: Cross, world: World): number | null {
+function anyTarget(): boolean {
+  return true;
+}
+
+function isPowerStation(t: Target): boolean {
+  return t.kind === "power";
+}
+
+/** The target closest to the cross within range that passes the filter; ties go to the earlier target. */
+export function nearestTarget(cross: Cross, world: World, accept: (t: Target) => boolean = anyTarget): number | null {
   let best: number | null = null;
   let bestDistance = Infinity;
   world.targets.forEach((t, index) => {
+    if (!accept(t)) return;
     const distance = Math.max(Math.abs(t.col - cross.col), Math.abs(t.row - cross.row));
     if (distance <= world.range && distance < bestDistance) {
       best = index;

@@ -19,6 +19,7 @@ export class InputController {
   private leftDown = false;
   private rightDown = false;
   private queued: Action[] = [];
+  private muteQueued = false;
 
   constructor() {
     window.addEventListener("keydown", this.onKeyDown);
@@ -36,6 +37,13 @@ export class InputController {
     return actions;
   }
 
+  /** True once for each fresh press of M: the sound toggle, which is not a game action. */
+  consumeMute(): boolean {
+    const pressed = this.muteQueued;
+    this.muteQueued = false;
+    return pressed;
+  }
+
   dispose(): void {
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
@@ -45,8 +53,9 @@ export class InputController {
     if (e.code === "ArrowLeft") this.leftDown = true;
     if (e.code === "ArrowRight") this.rightDown = true;
 
-    const action = ACTION_KEYS[e.code];
     // Holding a key should not spam the dashboard; only fresh presses count.
+    if (e.code === "KeyM" && !e.repeat) this.muteQueued = true;
+    const action = ACTION_KEYS[e.code];
     if (action && !e.repeat) this.queued.push(action);
   };
 

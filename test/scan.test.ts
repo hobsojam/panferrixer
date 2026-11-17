@@ -20,16 +20,19 @@ function scanningAt(x: number, y: number): DashboardState {
 describe("drops and ruins", () => {
   it("a missile hit turns the target into a ruin", () => {
     const world = worldFor(config);
+    // A power station is never a ruin, so use the first building that can be destroyed.
+    const index = world.targets.findIndex((t) => t.kind !== "power");
     const flying: AppState = {
       screen: "flight",
       dashboard: createDashboardState(config),
       flight: { ...createInitialState(1, config), phase: "hit" },
-      target: world.targets[0],
-      targetIndex: 0,
+      target: world.targets[index],
+      targetIndex: index,
+      shielded: false,
     };
     const next = updateApp(flying, { actions: ["activate"], steering: 0 }, DT, config, () => 1);
     expect(next.screen).toBe("dashboard");
-    if (next.screen === "dashboard") expect(next.dashboard.ruins).toEqual([0]);
+    if (next.screen === "dashboard") expect(next.dashboard.ruins).toEqual([index]);
   });
 
   it("a miss does not create a ruin", () => {
@@ -39,6 +42,7 @@ describe("drops and ruins", () => {
       flight: { ...createInitialState(1, config), phase: "miss" },
       target: base.targets[0],
       targetIndex: 0,
+      shielded: false,
     };
     const next = updateApp(flying, { actions: ["activate"], steering: 0 }, DT, config, () => 1);
     if (next.screen === "dashboard") expect(next.dashboard.ruins).toEqual([]);
@@ -50,20 +54,20 @@ describe("drops and ruins", () => {
   });
 
   it("walking within the pickup radius collects a drop automatically", () => {
-    const world = worldWith([{ col: 20, row: 5, kind: "dome", hasDrop: true }]);
+    const world = worldWith([{ col: 20, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
     const s = { ...scanningAt(19.6, 5), ruins: [0] };
     const next = stepDashboard(s, [], DT, world).state;
     expect(next.found).toEqual([0]);
   });
 
   it("a building with no drop gives nothing when walked over", () => {
-    const world = worldWith([{ col: 20, row: 5, kind: "dome", hasDrop: false }]);
+    const world = worldWith([{ col: 20, row: 5, kind: "dome", hasDrop: false, network: 0 }]);
     const next = stepDashboard({ ...scanningAt(20, 5), ruins: [0] }, [], DT, world).state;
     expect(next.found).toEqual([]);
   });
 
   it("a drop under a building that still stands is not collected", () => {
-    const world = worldWith([{ col: 20, row: 5, kind: "dome", hasDrop: true }]);
+    const world = worldWith([{ col: 20, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
     const next = stepDashboard(scanningAt(20, 5), [], DT, world).state;
     expect(next.found).toEqual([]);
   });
@@ -76,33 +80,33 @@ describe("scanning", () => {
   });
 
   it("reports nothing beyond the direction radius", () => {
-    const world = worldWith([{ col: 40, row: 5, kind: "dome", hasDrop: true }]);
+    const world = worldWith([{ col: 40, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
     const s = stepDashboard({ ...scanningAt(5, 5), ruins: [0] }, ["activate"], DT, world).state;
     expect(s.scan).toEqual({ kind: "none" });
   });
 
   it("gives a bearing within the direction radius but not close", () => {
-    const world = worldWith([{ col: 5 + 9, row: 5, kind: "dome", hasDrop: true }]);
+    const world = worldWith([{ col: 5 + 9, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
     const s = stepDashboard({ ...scanningAt(5, 5), ruins: [0] }, ["activate"], DT, world).state;
     expect(s.scan).toEqual({ kind: "signal", bearing: "E", close: false });
   });
 
   it("is close within the blip radius", () => {
-    const world = worldWith([{ col: 5, row: 5 - 3, kind: "dome", hasDrop: true }]);
+    const world = worldWith([{ col: 5, row: 5 - 3, kind: "dome", hasDrop: true, network: 0 }]);
     const s = stepDashboard({ ...scanningAt(5, 5), ruins: [0] }, ["activate"], DT, world).state;
     expect(s.scan).toEqual({ kind: "signal", bearing: "N", close: true });
   });
 
   it("ignores drops already found", () => {
-    const world = worldWith([{ col: 6, row: 5, kind: "dome", hasDrop: true }]);
+    const world = worldWith([{ col: 6, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
     const s = stepDashboard({ ...scanningAt(5, 5), ruins: [0], found: [0] }, ["activate"], DT, world).state;
     expect(s.scan).toEqual({ kind: "none" });
   });
 
   it("the nearest drop is the one reported", () => {
     const world = worldWith([
-      { col: 5, row: 5 + 10, kind: "dome", hasDrop: true },
-      { col: 5 + 9, row: 5, kind: "mine", hasDrop: true },
+      { col: 5, row: 5 + 10, kind: "dome", hasDrop: true, network: 0 },
+      { col: 5 + 9, row: 5, kind: "mine", hasDrop: true, network: 0 },
     ]);
     const s = stepDashboard({ ...scanningAt(5, 5), ruins: [0, 1] }, ["activate"], DT, world).state;
     expect(s.scan).toEqual({ kind: "signal", bearing: "E", close: false });
