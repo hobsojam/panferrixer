@@ -358,6 +358,22 @@ Author's idea: the player has a defensive gun (working name: CIWS, as on ships);
 
 **Title:** not chosen. Checked so far: "Terminal Phase" is already an existing space shooter (dropped); "Carapace" is used by several itch.io projects (crowded); "Blue Moon" is a place name in the original's backstory (avoid); "Nap of the Earth" turned up no game of that name in one search (candidate, not cleared). Choose the title once the setting is firmer, and check any candidate against Steam, itch.io and the trademark registers before publishing.
 
+### 4.14 Enemy build plan (proposal, not yet agreed)
+- **Why the hunter first:** the patroller has "defensive guns only, no missiles" (section 2.6), but the missile-defence mini-game starts on an incoming missile. Only the hunter (one per network, with guns and missiles) can start it, so slice 1 uses the hunter.
+- **Slice 1: one hunter per network.**
+  1. Hunter on the map: one per network, patrolling a beat between that network's buildings, shown on the mini map. It stays on its beat until alerted.
+  2. Alert: a scan ring (section 4.2) that reaches the hunter alerts it, and it heads for the robot.
+  3. Engagement: when in range, it fires a few missiles and the missile-defence mini-game starts (section 4.8), about 10 seconds long.
+  4. Damage: each missile that gets through costs one shield plate. Shields are the robot's own, so grid disable does not affect them.
+  5. Kill: one missile hit destroys the hunter (section 4.10). It is not replaced in this slice.
+- **Slice 2:** the patroller, which runs for help when it confirms an intruder, and the defender, which stays in its dome until alerted.
+- **Slice 3:** the hauler, which flees and takes its cargo with it. Bosses come last.
+- **Decisions still open for slice 1** (placeholders until agreed):
+  - Damage per missed missile: proposed one shield plate.
+  - Missiles per hunter attack: proposed three over about 10 seconds.
+  - Engagement and timers: the shield window keeps running during an engagement (decided).
+- **Controls:** keyboard only for the defence mini-game, as for the rest of the game. The mouse option in section 4.8 is not wanted for now.
+
 ## 5. Proof of concept plan
 - One network's worth: a handful of domes plus a power plant, one enemy type (a patroller), and the full missile loop (select, launch, guide, hit, drop, pick up). [Author-direction]
 - Verbs: Move, Scan, Missile first; add the grid-disabler when shielded domes arrive. Piece collection is automatic.
