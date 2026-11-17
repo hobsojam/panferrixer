@@ -10,7 +10,7 @@ const world = worldFor(config);
 
 /** The power station of a network, which every network has exactly one of. */
 function powerOf(network: number): Target {
-  const t = world.targets.find((x) => x.kind === "power" && networkOf(x, world) === network);
+  const t = world.targets.find((x) => x.kind === "power" && networkOf(x) === network);
   if (!t) throw new Error(`no power station in network ${network}`);
   return t;
 }
@@ -29,7 +29,7 @@ function flightFrom(dashboard: DashboardState, target: Target, phase: "flight" |
 describe("networks and power stations", () => {
   it("every town has exactly one power station", () => {
     world.towns.forEach((_, network) => {
-      const powers = world.targets.filter((t) => t.kind === "power" && networkOf(t, world) === network);
+      const powers = world.targets.filter((t) => t.kind === "power" && networkOf(t) === network);
       expect(powers).toHaveLength(1);
     });
   });
@@ -66,23 +66,23 @@ describe("grid disable", () => {
 
 describe("shields at launch", () => {
   it("a power station is never shielded", () => {
-    expect(isShielded(createDashboardState(config), powerOf(0), world)).toBe(false);
+    expect(isShielded(createDashboardState(config), powerOf(0))).toBe(false);
   });
 
   it("a building in a powered network is shielded", () => {
-    const building = world.targets.find((t) => t.kind !== "power" && networkOf(t, world) === 0);
+    const building = world.targets.find((t) => t.kind !== "power" && networkOf(t) === 0);
     expect(building).toBeDefined();
-    expect(isShielded(createDashboardState(config), building!, world)).toBe(true);
+    expect(isShielded(createDashboardState(config), building!)).toBe(true);
   });
 
   it("a building in a suppressed network is not shielded", () => {
-    const building = world.targets.find((t) => t.kind !== "power" && networkOf(t, world) === 0)!;
+    const building = world.targets.find((t) => t.kind !== "power" && networkOf(t) === 0)!;
     const down = { ...createDashboardState(config), suppressedUntil: { 0: 100 } };
-    expect(isShielded(down, building, world)).toBe(false);
+    expect(isShielded(down, building)).toBe(false);
   });
 
   it("a missile fired while suppressed stays unshielded even if the window closes in flight", () => {
-    const building = world.targets.find((t) => t.kind !== "power" && networkOf(t, world) === 0)!;
+    const building = world.targets.find((t) => t.kind !== "power" && networkOf(t) === 0)!;
     const down = { ...createDashboardState(config), suppressedUntil: { 0: 5 }, time: 4 };
     const fired = updateApp({ screen: "dashboard", dashboard: { ...down, row: 0, col: 0, mode: "targeting", target: world.targets.indexOf(building), cross: { col: building.col, row: building.row } } }, { actions: ["activate"], steering: 0 }, DT, config, () => 1);
     expect(fired.screen).toBe("flight");
@@ -98,14 +98,14 @@ describe("shields at launch", () => {
 
 describe("what a hit does", () => {
   it("a deflected hit leaves no ruin", () => {
-    const building = world.targets.find((t) => t.kind !== "power" && networkOf(t, world) === 0)!;
+    const building = world.targets.find((t) => t.kind !== "power" && networkOf(t) === 0)!;
     const flying = flightFrom(createDashboardState(config), building, "hit", true);
     const next = updateApp(flying, { actions: ["activate"], steering: 0 }, DT, config, () => 1);
     if (next.screen === "dashboard") expect(next.dashboard.ruins).toEqual([]);
   });
 
   it("an unshielded hit on a building leaves a ruin", () => {
-    const building = world.targets.find((t) => t.kind !== "power" && networkOf(t, world) === 0)!;
+    const building = world.targets.find((t) => t.kind !== "power" && networkOf(t) === 0)!;
     const flying = flightFrom(createDashboardState(config), building, "hit", false);
     const next = updateApp(flying, { actions: ["activate"], steering: 0 }, DT, config, () => 1);
     if (next.screen === "dashboard") expect(next.dashboard.ruins).toEqual([world.targets.indexOf(building)]);
@@ -137,5 +137,18 @@ describe("what a hit does", () => {
     const flying = flightFrom(createDashboardState(config), building, "flight", true);
     const next = updateApp(flying, { actions: [], steering: 0 }, DT, config, () => 1);
     if (next.screen === "flight") expect(next.dashboard.time).toBeCloseTo(DT);
+  });
+});
+
+describe("overlapping towns", () => {
+  it("a building is only unshielded by its own network's window, even where towns overlap", () => {
+    const network = (t: Target) => networkOf(t);
+    for (const building of world.targets.filter((t) => t.kind !== "power")) {
+      const own = network(building);
+      const ownDown = { ...createDashboardState(config), suppressedUntil: { [own]: 1000 } };
+      expect(isShielded(ownDown, building)).toBe(false);
+      const otherDown = { ...createDashboardState(config), suppressedUntil: { [own + 1]: 1000 } };
+      expect(isShielded(otherDown, building)).toBe(true);
+    }
   });
 });

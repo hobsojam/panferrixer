@@ -56,7 +56,7 @@ export function updateApp(
         flight: createInitialState(newSeed(), cfg),
         target: step.fire,
         targetIndex: world.targets.indexOf(step.fire),
-        shielded: isShielded(step.state, step.fire, world),
+        shielded: isShielded(step.state, step.fire),
       };
     }
     return { screen: "dashboard", dashboard: step.state };
@@ -78,7 +78,7 @@ export function updateApp(
 
   // A hit on a power station takes its network's shields down. The station itself survives.
   if (flight.phase === "hit" && state.flight.phase !== "hit" && state.target.kind === "power") {
-    return { ...state, dashboard: openWindow(dashboard, networkOf(state.target, world), world), flight };
+    return { ...state, dashboard: openWindow(dashboard, networkOf(state.target), world), flight };
   }
   return { ...state, dashboard, flight };
 }
