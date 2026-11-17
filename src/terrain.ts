@@ -94,7 +94,7 @@ function generateProfile(rng: Rng, tc: Config["terrain"]): PeakPoint[] {
   return points.sort((a, b) => a.nx - b.nx);
 }
 
-function generateBandPeaks(rng: Rng, tc: Config["terrain"], busy: boolean, keepCentreClear: boolean): Peak[] {
+function generateBandPeaks(rng: Rng, tc: Config["terrain"], busy: boolean, corridorHalfWidth: number): Peak[] {
   const peaks: Peak[] = [];
   const limit = 1 + tc.placementOverhang;
   const count = busy ? rangeInt(rng, tc.busyPeaksMin, tc.busyPeaksMax) : rangeInt(rng, tc.calmPeaksMin, tc.calmPeaksMax);
@@ -103,8 +103,8 @@ function generateBandPeaks(rng: Rng, tc: Config["terrain"], busy: boolean, keepC
     const halfWidth = rangeFloat(rng, tc.peakHalfWidthMin, tc.peakHalfWidthMax);
     let center = rangeFloat(rng, -limit, limit);
 
-    if (keepCentreClear) {
-      const clearance = tc.launchCorridorHalfWidth + halfWidth;
+    if (corridorHalfWidth > 0) {
+      const clearance = corridorHalfWidth + halfWidth;
       if (Math.abs(center) < clearance) center = (center < 0 ? -1 : 1) * clearance;
     }
 
@@ -152,9 +152,10 @@ function generateStretches(rng: Rng, tc: Config["terrain"], bandCount: number): 
 export function generateTerrain(seed: number, cfg: Config): Terrain {
   const tc = cfg.terrain;
   const flightHeight = cfg.camera.height;
-  const mountainEndDepth = cfg.flight.totalDistance * cfg.terminalPhase.startFraction;
+  const terminalStartDepth = cfg.flight.totalDistance * cfg.terminalPhase.startFraction;
   const bandDepths: number[] = [];
-  for (let depth = tc.bandSpacing; depth < mountainEndDepth; depth += tc.bandSpacing) {
+  // Mountains run all the way to the target, so there is no empty stretch before it.
+  for (let depth = tc.bandSpacing; depth < cfg.flight.totalDistance; depth += tc.bandSpacing) {
     bandDepths.push(depth);
   }
 
@@ -162,10 +163,16 @@ export function generateTerrain(seed: number, cfg: Config): Terrain {
     const rng = createRng(seed + attempt * 7919);
     const busyByBand = generateStretches(rng, tc, bandDepths.length);
     const candidate: Terrain = {
-      bands: bandDepths.map((depth, index) => ({
-        depth,
-        peaks: generateBandPeaks(rng, tc, busyByBand[index], index < tc.launchClearBands),
-      })),
+      bands: bandDepths.map((depth, index) => {
+        // The approach to the target is always busy, with a clear lane straight to it.
+        const approach = depth >= terminalStartDepth;
+        const corridor = approach
+          ? cfg.terminalPhase.approachCorridorHalfWidth
+          : index < tc.launchClearBands
+            ? tc.launchCorridorHalfWidth
+            : 0;
+        return { depth, peaks: generateBandPeaks(rng, tc, approach || busyByBand[index], corridor) };
+      }),
     };
     if (findPassablePath(candidate, tc.pathCellCount, tc.maxLateralStepPerBand, flightHeight) !== null) {
       return candidate;

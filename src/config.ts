@@ -92,6 +92,7 @@ export const config = {
   terminalPhase: {
     startFraction: 0.85, // fraction of totalDistance where mountains stop and the target appears
     targetHalfWidth: 0.18, // lateral tolerance counted as a hit
+    approachCorridorHalfWidth: 0.25, // clear lane straight to the target through the surrounding mountains
   },
 
   feelTestToggles: {
