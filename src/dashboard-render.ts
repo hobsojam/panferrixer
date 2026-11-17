@@ -1,6 +1,6 @@
 import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
-import { AVAILABLE_VERBS, VERB_GRID, gridDisableReady, isLow, isSuppressed, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
+import { AVAILABLE_VERBS, VERB_GRID, gridDisableReady, isLow, isSuppressed, positionOf, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
 import { drawGlow } from "./render";
 import { findRoute } from "./route";
@@ -302,7 +302,8 @@ function drawLocalMap(
 
   const targeting = state.mode === "targeting";
   world.targets.forEach((t, index) => {
-    const [tx, ty] = toScreen(t.col, t.row);
+    const at = positionOf(state, index, world);
+    const [tx, ty] = toScreen(at.x, at.y);
     if (state.ruins.includes(index)) {
       drawRuin(ctx, tx, ty, c.panelDim);
       return;
@@ -416,8 +417,9 @@ function drawFullMap(
   }
 
   ctx.fillStyle = c.text;
-  for (const t of world.targets) {
-    const [tx, ty] = toScreen(t.col, t.row);
+  for (const [index] of world.targets.entries()) {
+    const at = positionOf(state, index, world);
+    const [tx, ty] = toScreen(at.x, at.y);
     ctx.beginPath();
     ctx.arc(tx, ty, 1, 0, Math.PI * 2);
     ctx.fill();
