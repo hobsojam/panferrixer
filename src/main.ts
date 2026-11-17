@@ -39,7 +39,7 @@ function frame(now: number): void {
   if (state.screen === "dashboard") {
     renderDashboard(ctx!, state.dashboard, config);
   } else {
-    render(ctx!, state.flight, config);
+    render(ctx!, state.flight, config, state.target.kind);
   }
   requestAnimationFrame(frame);
 }

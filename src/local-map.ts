@@ -59,8 +59,8 @@ function smooth(grid: number[][]): number[][] {
   );
 }
 
-/** Placeholder target kinds named in design-notes 2.8. Their art is not designed yet. */
-export type TargetKind = "power" | "mine" | "beacon" | "dome";
+/** Placeholder target kinds: the comms centre replaces the original beacon (design-notes 4.4). Art is not designed yet. */
+export type TargetKind = "power" | "mine" | "commsCentre" | "dome";
 
 export interface Target {
   col: number;
@@ -68,7 +68,7 @@ export interface Target {
   kind: TargetKind;
 }
 
-const TARGET_KINDS: readonly TargetKind[] = ["power", "mine", "beacon", "dome"];
+const TARGET_KINDS: readonly TargetKind[] = ["power", "mine", "commsCentre", "dome"];
 
 /**
  * Placeholder targets on a node's patch: on ground or high ground, never in a valley,

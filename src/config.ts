@@ -109,6 +109,7 @@ export const config = {
     formName: "PROTOTYPE", // placeholder for the robot form shown in the name bar
     startNode: 0, // index into the network map where the robot begins
     targetRange: 6, // in local-map cells, Chebyshev distance from the cross
+    targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
 
   // Local view: a patch of ground around the robot, for the dashboard mini map (design-notes 2.7).

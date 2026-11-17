@@ -1,6 +1,7 @@
 import type { Config } from "./config";
 import { AVAILABLE_VERBS, VERB_GRID, isLow, selectedVerb, worldFor, type DashboardState, type TargetingWorld, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
+import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
 import { drawGlow } from "./render";
 
 const VERB_LABELS: Record<Verb, string> = {
@@ -13,7 +14,7 @@ const VERB_LABELS: Record<Verb, string> = {
 const TARGET_LABELS: Record<Target["kind"], string> = {
   power: "POWER",
   mine: "MINE",
-  beacon: "BEACON",
+  commsCentre: "COMMS CENTRE",
   dome: "DOME",
 };
 
@@ -213,12 +214,15 @@ function drawLocalMap(
     world.targets.forEach((t, index) => {
       const [tx, ty] = cellCentre(t.col, t.row);
       const inRange = state.target === index;
-      drawGlow(ctx, c.panelSelected, inRange ? 6 : 0, () => {
-        ctx.strokeStyle = inRange ? c.panelSelected : c.text;
-        ctx.lineWidth = 1.2;
-        ctx.globalAlpha = inRange ? 1 : 0.6;
-        ctx.strokeRect(tx - 3, ty - 3, 6, 6);
-      });
+      ctx.globalAlpha = inRange ? 1 : 0.6;
+      const iconWidth = cfg.dashboard.targetIconWidth;
+      const color = inRange ? c.panelSelected : c.text;
+      if (hasArt(t.kind)) {
+        strokeArt(ctx, BUILDING_ART[t.kind]!.simple, tx, ty + iconWidth / 4, iconWidth / 2, color, 1.2, inRange ? 6 : 0);
+      } else {
+        drawPlaceholderMarker(ctx, tx, ty, color, inRange);
+      }
+      ctx.globalAlpha = 1;
     });
     ctx.globalAlpha = 1;
 
@@ -393,4 +397,13 @@ function drawText(
   ctx.textBaseline = "middle";
   ctx.fillText(text, x, y);
   ctx.globalAlpha = 1;
+}
+
+/** Plain square for a building kind whose art is not designed yet. */
+function drawPlaceholderMarker(ctx: CanvasRenderingContext2D, cx: number, cy: number, color: string, glow: boolean): void {
+  drawGlow(ctx, color, glow ? 6 : 0, () => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.2;
+    ctx.strokeRect(cx - 3, cy - 3, 6, 6);
+  });
 }
