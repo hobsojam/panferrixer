@@ -369,6 +369,14 @@ Author's idea: the player has a defensive gun (working name: CIWS, as on ships);
 - **Slice 2:** the patroller, which runs for help when it confirms an intruder, and the defender, which stays in its dome until alerted.
 - **Slice 3:** the hauler, which flees and takes its cargo with it. Bosses come last.
   - Decided (author): no escort for the hauler for now. Revisit if playtesting shows haulers are easy prey.
+- **Hunter behaviour (agreed by the author, section 4.10 stances):** a scan no longer starts an attack. It alerts the hunter, and the hunter becomes a live enemy with these stages:
+  1. **Idle:** stays at its post, unaware.
+  2. **Alerted:** a scan's ring reached it. It moves toward the robot.
+  3. **Engaging:** the robot is within engage range. A short warning, then the attack, as above.
+  4. **Chasing:** it keeps pursuing while the robot is within its leash. Its leash is about two towns' distance from its post.
+  5. **Dead:** a missile hit.
+  - An alerted hunter stays alerted until it leaves its leash or dies. There is no timer for losing track.
+  - Once it is dead it stays dead for good.
   - Clarified: a destroyed hauler leaves its cargo to be picked up with the scanner (section 2.6), so killing it is a reward. Fleeing is what takes the cargo away (section 4.10).
 - **Decisions still open for slice 1** (placeholders until agreed):
   - Hits per plate: 3 (section 4.9), or 2 for the tighter option in 4.9.
