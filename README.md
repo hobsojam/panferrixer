@@ -15,16 +15,18 @@ have not been implemented yet.
 The playable prototype currently includes:
 
 - A persistent dashboard with the robot's state-of-mind trace, energy and shield displays,
-  action panels, and a map.
+  action panels, a map, and synthesised sound effects.
 - One generated world containing connected towns, buildings, valleys, and impassable high
   ground.
 - Local and full-map views, plus pathfinding that walks the robot to a chosen reachable cell.
 - Missile targeting against nearby buildings.
 - A forward-looking wireframe missile flight with generated terrain, terminal target art,
   collisions, misses, and explosion effects.
-- Persistent destruction: a successful strike leaves a ruin on the map.
-- Scanning for drops beneath destroyed buildings and automatic collection when the robot
-  reaches one.
+- Network shields that can be suppressed for a timed window by striking a power station or
+  using grid disable.
+- Persistent destruction: a successful unshielded strike leaves a ruin on the map.
+- A visible scan pulse that searches for drops beneath destroyed buildings, plus automatic
+  collection when the robot reaches one.
 
 Enemies, combat against the robot, resource depletion, upgrades, saving, and the complete
 game objective are still planned rather than playable.
@@ -44,10 +46,11 @@ The prototype is keyboard-only.
 
 | Context | Controls |
 |---|---|
-| Dashboard | Arrow keys move between actions. Space or Enter activates the selection. |
+| Dashboard | Arrow keys move between actions. Space or Enter activates the selection. M toggles sound. |
 | Map panel | Move right from the action grid to select the map. Space or Enter toggles the local and full-map views; Left returns to the actions. |
 | Move | Use the arrow keys to position the cross. Space or Enter sets a walking route; Escape cancels. |
 | Scan | Select **SCAN**, then press Space or Enter. The result reports the nearest eligible drop when it is in range. |
+| Grid disable | Select **GRID DISABLE**, choose a power station with the arrow keys, then press Space or Enter to suppress that station's network shields. Escape cancels. |
 | Missile targeting | Use the arrow keys to position the cross near a building. Space or Enter fires at the selected target; Escape cancels. |
 | Missile flight | Hold Left or Right to steer. The missile flies forward at a fixed speed and altitude. |
 | Flight result | Press Space or Enter to return to the dashboard. |
@@ -69,9 +72,12 @@ can be hit, while terrain below it is scenery the missile passes over. Collision
 same silhouette that is drawn on screen. Terrain is generated from a seed and validated so a
 flyable route exists before it is used.
 
-A hit turns the chosen building into a ruin. Drops remain hidden until their building has
-been destroyed; scanning then gives progressively better information at closer ranges, and
-walking close enough collects the drop automatically.
+Most buildings are protected by their network's shields. Hitting the network's power station,
+or selecting it with grid disable, opens a timed window in which other buildings can be
+destroyed; the power station itself survives. A successful unshielded hit turns the chosen
+building into a ruin. Drops remain hidden until their building has been destroyed; scanning
+then sends a visible pulse across the map and gives progressively better information at
+closer ranges. Walking close enough collects the drop automatically.
 
 ## Project layout
 
@@ -87,6 +93,7 @@ walking close enough collects the drop automatically.
 | `src/render.ts` | Missile-flight rendering |
 | `src/building-art.ts` | Shared line art for building targets |
 | `src/explosion.ts` | Hit and crash effects |
+| `src/sound.ts` | Synthesised dashboard and missile-flight sound effects |
 | `src/input.ts` | Keyboard actions and steering input |
 | `src/config.ts` | Tuning values and display configuration |
 | `test/` | Unit tests for the game rules and generated terrain |
