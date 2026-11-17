@@ -1,5 +1,4 @@
 import type { Config } from "./config";
-import { NETWORK, neighboursOf } from "./map";
 import { generateLocalMap, targetsFor, type LocalMap, type Target } from "./local-map";
 
 /** The four verbs from design-notes 4.6. Missile and Move work; scan and grid disable do not yet. */
@@ -20,18 +19,18 @@ export interface Cross {
   row: number;
 }
 
-/** Everything the dashboard needs to know about the robot's current node. */
+/** A position in the local patch, in cell units. Whole numbers are cell corners' indices; the robot is drawn at each cell's centre. */
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/** What the dashboard needs to know about the robot's current node. */
 export interface NodeWorld {
   map: LocalMap;
   targets: readonly Target[];
   range: number;
-  neighbours: readonly number[];
-  travelSeconds: number;
-}
-
-export interface TravelState {
-  to: number;
-  remaining: number; // seconds left
+  walkSpeed: number; // cells per second
 }
 
 export interface DashboardState {
@@ -42,10 +41,10 @@ export interface DashboardState {
   time: number; // seconds on the dashboard; drives the state-of-mind trace
   location: number; // index of the network node the robot is at
   mode: "browse" | "targeting" | "moving";
-  cross: Cross;
+  cross: Cross; // the pointer used while targeting or choosing a walk point
   target: number | null; // index into the node's targets, when one is in range
-  moveChoice: number; // index into the node's neighbours, while moving
-  travel: TravelState | null; // set while the robot is travelling to a node
+  pos: Point; // where the robot is in the local patch
+  walk: Point | null; // where the robot is walking to, if it is walking
 }
 
 export interface DashboardStep {
@@ -55,7 +54,7 @@ export interface DashboardStep {
 
 const worldCache = new Map<number, NodeWorld>();
 
-/** The local patch, targets and links for a node. Cached: the same node is asked for every frame. */
+/** The local patch and its targets for a node. Cached: the same node is asked for every frame. */
 export function worldFor(location: number, cfg: Config): NodeWorld {
   let world = worldCache.get(location);
   if (!world) {
@@ -64,8 +63,7 @@ export function worldFor(location: number, cfg: Config): NodeWorld {
       map,
       targets: targetsFor(location, map, cfg.localMap),
       range: cfg.dashboard.targetRange,
-      neighbours: neighboursOf(location, NETWORK),
-      travelSeconds: cfg.dashboard.travelSeconds,
+      walkSpeed: cfg.dashboard.walkSpeed,
     };
     worldCache.set(location, world);
   }
@@ -73,6 +71,8 @@ export function worldFor(location: number, cfg: Config): NodeWorld {
 }
 
 export function createDashboardState(cfg: Config): DashboardState {
+  const centreCol = Math.floor(cfg.localMap.cols / 2);
+  const centreRow = Math.floor(cfg.localMap.rows / 2);
   return {
     row: 0,
     col: 0,
@@ -81,10 +81,10 @@ export function createDashboardState(cfg: Config): DashboardState {
     time: 0,
     location: cfg.dashboard.startNode,
     mode: "browse",
-    cross: { col: Math.floor(cfg.localMap.cols / 2), row: Math.floor(cfg.localMap.rows / 2) },
+    cross: { col: centreCol, row: centreRow },
     target: null,
-    moveChoice: 0,
-    travel: null,
+    pos: { x: centreCol, y: centreRow },
+    walk: null,
   };
 }
 
@@ -93,17 +93,11 @@ export function selectedVerb(state: DashboardState): Verb {
 }
 
 /**
- * Pure: moves the selection, moves the cross, chooses a destination, runs travel,
- * and reports a confirmed target. Input is ignored while travelling.
+ * Pure: moves the selection and the cross, sets walk points, advances the walk,
+ * and reports a confirmed target. The walk keeps going whatever the mode.
  */
 export function stepDashboard(state: DashboardState, actions: readonly Action[], dt: number, world: NodeWorld): DashboardStep {
-  let s: DashboardState = { ...state, time: state.time + dt };
-
-  if (s.travel) {
-    const remaining = s.travel.remaining - dt;
-    if (remaining > 0) return { state: { ...s, travel: { ...s.travel, remaining } }, fire: null };
-    return { state: { ...s, location: s.travel.to, travel: null, mode: "browse", target: null }, fire: null };
-  }
+  let s: DashboardState = walkStep({ ...state, time: state.time + dt }, dt, world.walkSpeed);
 
   let fire: Target | null = null;
   for (const action of actions) {
@@ -123,6 +117,17 @@ export function stepDashboard(state: DashboardState, actions: readonly Action[],
   return { state: s, fire };
 }
 
+/** Moves the robot toward its walk point at the walk speed, and stops it on arrival. */
+function walkStep(s: DashboardState, dt: number, speed: number): DashboardState {
+  if (!s.walk) return s;
+  const dx = s.walk.x - s.pos.x;
+  const dy = s.walk.y - s.pos.y;
+  const distance = Math.hypot(dx, dy);
+  const step = speed * dt;
+  if (distance <= step) return { ...s, pos: { ...s.walk }, walk: null };
+  return { ...s, pos: { x: s.pos.x + (dx / distance) * step, y: s.pos.y + (dy / distance) * step } };
+}
+
 function browseAction(s: DashboardState, action: Action, world: NodeWorld): DashboardState {
   if (action === "up") return { ...s, row: Math.max(0, s.row - 1) };
   if (action === "down") return { ...s, row: Math.min(VERB_GRID.length - 1, s.row + 1) };
@@ -134,8 +139,9 @@ function browseAction(s: DashboardState, action: Action, world: NodeWorld): Dash
       const cross = { col: Math.floor(world.map.cols / 2), row: Math.floor(world.map.rows / 2) };
       return { ...s, mode: "targeting", cross, target: nearestTarget(cross, world) };
     }
-    if (verb === "move" && world.neighbours.length > 0) {
-      return { ...s, mode: "moving", moveChoice: 0 };
+    if (verb === "move") {
+      const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
+      return { ...s, mode: "moving", cross };
     }
   }
   return s;
@@ -143,27 +149,23 @@ function browseAction(s: DashboardState, action: Action, world: NodeWorld): Dash
 
 function movingAction(s: DashboardState, action: Action, world: NodeWorld): DashboardState {
   if (action === "cancel") return { ...s, mode: "browse" };
-  if (action === "left" || action === "up") return { ...s, moveChoice: Math.max(0, s.moveChoice - 1) };
-  if (action === "right" || action === "down") {
-    return { ...s, moveChoice: Math.min(world.neighbours.length - 1, s.moveChoice + 1) };
-  }
   if (action === "activate") {
-    return {
-      ...s,
-      mode: "browse",
-      travel: { to: world.neighbours[s.moveChoice], remaining: world.travelSeconds },
-    };
+    return { ...s, mode: "browse", walk: { x: s.cross.col, y: s.cross.row } };
   }
-  return s;
+  return { ...s, cross: shiftCross(s.cross, action, world) };
+}
+
+function shiftCross(cross: Cross, action: Action, world: NodeWorld): Cross {
+  const dCol = action === "left" ? -1 : action === "right" ? 1 : 0;
+  const dRow = action === "up" ? -1 : action === "down" ? 1 : 0;
+  return {
+    col: clamp(cross.col + dCol, 0, world.map.cols - 1),
+    row: clamp(cross.row + dRow, 0, world.map.rows - 1),
+  };
 }
 
 function moveCross(s: DashboardState, action: Action, world: NodeWorld): DashboardState {
-  const dCol = action === "left" ? -1 : action === "right" ? 1 : 0;
-  const dRow = action === "up" ? -1 : action === "down" ? 1 : 0;
-  const cross = {
-    col: clamp(s.cross.col + dCol, 0, world.map.cols - 1),
-    row: clamp(s.cross.row + dRow, 0, world.map.rows - 1),
-  };
+  const cross = shiftCross(s.cross, action, world);
   return { ...s, cross, target: nearestTarget(cross, world) };
 }
 

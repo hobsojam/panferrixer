@@ -1,81 +1,83 @@
 import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
 import { createDashboardState, stepDashboard, worldFor, type Action, type DashboardState } from "../src/dashboard";
-import { NETWORK, neighboursOf } from "../src/map";
 
 const DT = 1 / 60;
-const start = config.dashboard.startNode;
-const world = worldFor(start, config);
+const world = worldFor(config.dashboard.startNode, config);
 
-function step(state: DashboardState, actions: Action[], dt = DT) {
-  return stepDashboard(state, actions, dt, world);
+function step(state: DashboardState, actions: Action[], dt = DT): DashboardState {
+  return stepDashboard(state, actions, dt, world).state;
 }
 
-/** A dashboard with the Move verb selected. */
-function onMove(): DashboardState {
-  return { ...createDashboardState(config), row: 0, col: 0 };
+/** A dashboard with Move selected and the point chooser open. */
+function choosing(): DashboardState {
+  return step(createDashboardState(config), ["activate"]);
 }
 
-describe("network neighbours", () => {
-  it("lists the linked nodes in order", () => {
-    expect(neighboursOf(0, NETWORK)).toEqual([1, 5]);
+describe("choosing a walk point", () => {
+  it("activating Move opens the chooser with the cross on the robot", () => {
+    const s = choosing();
+    expect(s.mode).toBe("moving");
+    expect(s.cross).toEqual({ col: Math.round(s.pos.x), row: Math.round(s.pos.y) });
   });
 
-  it("gives every node at least one neighbour, so the robot can always move", () => {
-    for (let node = 0; node < NETWORK.nodes.length; node++) {
-      expect(neighboursOf(node, NETWORK).length, `node ${node}`).toBeGreaterThan(0);
-    }
+  it("the cross moves over the local map and cannot leave it", () => {
+    let s = choosing();
+    for (let i = 0; i < world.map.cols + 5; i++) s = step(s, ["right"]);
+    expect(s.cross.col).toBe(world.map.cols - 1);
+    for (let i = 0; i < world.map.rows + 5; i++) s = step(s, ["down"]);
+    expect(s.cross.row).toBe(world.map.rows - 1);
+  });
+
+  it("cancel leaves the chooser without setting a walk", () => {
+    const s = step(choosing(), ["right", "cancel"]);
+    expect(s.mode).toBe("browse");
+    expect(s.walk).toBeNull();
   });
 });
 
-describe("moving", () => {
-  it("activating Move opens the node chooser on the first neighbour", () => {
-    const next = step(onMove(), ["activate"]).state;
-    expect(next.mode).toBe("moving");
-    expect(next.moveChoice).toBe(0);
-  });
-
-  it("arrows cycle through neighbours and stop at the ends", () => {
-    let s = step(onMove(), ["activate"]).state;
-    s = step(s, ["right", "right", "right"]).state;
-    expect(s.moveChoice).toBe(world.neighbours.length - 1);
-    s = step(s, ["left", "left", "left"]).state;
-    expect(s.moveChoice).toBe(0);
-  });
-
-  it("cancel leaves the chooser without travelling", () => {
-    let s = step(onMove(), ["activate"]).state;
-    s = step(s, ["cancel"]).state;
+describe("walking", () => {
+  it("confirming sets the walk point to the cross", () => {
+    const s = step(choosing(), ["right", "right", "activate"]);
     expect(s.mode).toBe("browse");
-    expect(s.travel).toBeNull();
+    expect(s.walk).toEqual({ x: s.pos.x + 2, y: s.pos.y });
   });
 
-  it("confirming starts travel to the chosen neighbour", () => {
-    let s = step(onMove(), ["activate"]).state;
-    s = step(s, ["right", "activate"]).state;
-    expect(s.travel).toEqual({ to: world.neighbours[1], remaining: world.travelSeconds });
+  it("moves at the walk speed", () => {
+    let s = step(choosing(), ["right", "right", "right", "right", "activate"]);
+    const start = { ...s.pos };
+    s = step(s, [], 0.5);
+    expect(s.pos.x - start.x).toBeCloseTo(config.dashboard.walkSpeed * 0.5, 6);
+    expect(s.pos.y).toBeCloseTo(start.y, 6);
   });
 
-  it("arrives at the destination once the travel time has passed", () => {
-    let s = step(onMove(), ["activate"]).state;
-    s = step(s, ["activate"]).state;
-    const destination = world.neighbours[0];
-
-    s = step(s, [], world.travelSeconds / 2).state;
-    expect(s.location).toBe(start);
-    expect(s.travel).not.toBeNull();
-
-    s = step(s, [], world.travelSeconds).state;
-    expect(s.location).toBe(destination);
-    expect(s.travel).toBeNull();
-    expect(s.mode).toBe("browse");
+  it("stops on the walk point and clears the walk", () => {
+    let s = step(choosing(), ["right", "right", "activate"]);
+    const destination = { ...s.walk! };
+    s = step(s, [], 10);
+    expect(s.pos).toEqual(destination);
+    expect(s.walk).toBeNull();
   });
 
-  it("ignores input while travelling", () => {
-    let s = step(onMove(), ["activate"]).state;
-    s = step(s, ["activate"]).state;
-    const during = step(s, ["right", "activate", "cancel"]).state;
-    expect(during.travel).not.toBeNull();
-    expect(during.location).toBe(start);
+  it("does not change the node the robot is at", () => {
+    let s = step(choosing(), ["right", "activate"]);
+    s = step(s, [], 10);
+    expect(s.location).toBe(config.dashboard.startNode);
+  });
+
+  it("keeps walking while the player browses the verbs", () => {
+    let s = step(choosing(), ["right", "right", "activate"]);
+    const before = s.pos.x;
+    s = step(s, ["left", "right"], 0.5);
+    expect(s.pos.x).toBeGreaterThan(before);
+  });
+
+  it("a new walk point redirects a robot already on its way", () => {
+    let s = step(choosing(), ["right", "right", "right", "right", "activate"]);
+    s = step(s, [], 0.5);
+    s = step(s, ["activate"]);
+    expect(s.mode).toBe("moving");
+    s = step(s, ["left", "left", "left", "left", "left", "left", "activate"]);
+    expect(s.walk).toEqual({ x: s.cross.col, y: s.cross.row });
   });
 });

@@ -42,9 +42,8 @@ export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardS
 }
 
 function hintFor(state: DashboardState): string {
-  if (state.travel) return "TRAVELLING";
   if (state.mode === "targeting") return "ARROWS MOVE CROSS     SPACE FIRE     ESC CANCEL";
-  if (state.mode === "moving") return "ARROWS CHOOSE NODE     SPACE TRAVEL     ESC CANCEL";
+  if (state.mode === "moving") return "ARROWS MOVE POINT     SPACE WALK HERE     ESC CANCEL";
   return "ARROWS SELECT     SPACE ACTIVATE";
 }
 
@@ -135,12 +134,12 @@ function drawSidePanel(ctx: CanvasRenderingContext2D, state: DashboardState, wor
   ctx.lineTo(x + width - 8, PANEL_TOP + 140);
   ctx.stroke();
 
-  if (state.travel) {
-    drawTravelReadout(ctx, state, cfg, x);
-  } else if (state.mode === "targeting") {
+  if (state.mode === "targeting") {
     drawTargetingReadout(ctx, state, world, cfg, x);
   } else if (state.mode === "moving") {
-    drawMovingReadout(ctx, state, world, cfg, x);
+    drawMovingReadout(ctx, cfg, x);
+  } else if (state.walk) {
+    drawWalkingReadout(ctx, state, cfg, x);
   } else {
     drawSelectedReadout(ctx, state, cfg, x);
   }
@@ -164,27 +163,26 @@ function drawSelectedReadout(ctx: CanvasRenderingContext2D, state: DashboardStat
     "left"
   );
   if (available) {
-    const prompt = verb === "move" ? "SPACE TO CHOOSE A NODE" : "SPACE TO FIRE";
+    const prompt = verb === "move" ? "SPACE TO CHOOSE A POINT" : "SPACE TO FIRE";
     drawText(ctx, prompt, x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
   }
 }
 
-function drawMovingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, world: NodeWorld, cfg: Config, x: number): void {
+function drawMovingReadout(ctx: CanvasRenderingContext2D, cfg: Config, x: number): void {
   const c = cfg.colors;
-  const destination = world.neighbours[state.moveChoice];
-  drawText(ctx, "MOVE TO", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
-  drawText(ctx, `NODE ${destination + 1}`, x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
-  drawText(ctx, `${state.moveChoice + 1} OF ${world.neighbours.length} LINKS`, x + 14, PANEL_TOP + 204, 13, c.energy, 1, "monospace", "left");
-  drawText(ctx, "SPACE TO TRAVEL", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
+  drawText(ctx, "WALK TO", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
+  drawText(ctx, "CHOOSE A POINT", x + 14, PANEL_TOP + 180, 16, c.panelSelected, 1, "monospace", "left");
+  drawText(ctx, "SPACE TO WALK THERE", x + 14, PANEL_TOP + 204, 12, c.energy, 1, "monospace", "left");
 }
 
-function drawTravelReadout(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, x: number): void {
+function drawWalkingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, x: number): void {
   const c = cfg.colors;
-  const travel = state.travel;
-  if (!travel) return;
-  drawText(ctx, "TRAVELLING", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
-  drawText(ctx, `TO NODE ${travel.to + 1}`, x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
-  drawText(ctx, `${travel.remaining.toFixed(1)} S LEFT`, x + 14, PANEL_TOP + 204, 13, c.energy, 1, "monospace", "left");
+  const walk = state.walk;
+  if (!walk) return;
+  const distance = Math.hypot(walk.x - state.pos.x, walk.y - state.pos.y);
+  drawText(ctx, "WALKING", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
+  drawText(ctx, `${distance.toFixed(1)} CELLS TO GO`, x + 14, PANEL_TOP + 180, 16, c.panelSelected, 1, "monospace", "left");
+  drawText(ctx, "CHOOSE ANOTHER POINT TO REDIRECT", x + 14, PANEL_TOP + 204, 11, c.text, 0.7, "monospace", "left");
 }
 
 function drawTargetingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, world: NodeWorld, cfg: Config, x: number): void {
@@ -203,10 +201,10 @@ function drawTargetingReadout(ctx: CanvasRenderingContext2D, state: DashboardSta
 }
 
 /**
- * Local view: ground around the robot, with the robot fixed at the centre.
- * Valleys are faint dots, ground is dots, high ground is filled. Buildings are
- * always shown. While targeting, the cross shows where the player is pointing and
- * the target in range is highlighted.
+ * Local view: the ground of the robot's node. Valleys are faint dots, ground is dots,
+ * high ground is filled. Buildings are always shown. The robot moves across the view
+ * as it walks. While targeting or choosing a walk point, the cross shows the pointer,
+ * and during walking the destination is marked.
  */
 function drawLocalMap(
   ctx: CanvasRenderingContext2D,
@@ -258,27 +256,45 @@ function drawLocalMap(
     ctx.globalAlpha = 1;
   });
 
-  if (targeting) {
+  if (state.mode !== "browse") {
     const [cx, cy] = cellCentre(state.cross.col, state.cross.row);
-    drawGlow(ctx, c.panelSelected, 4, () => {
-      ctx.strokeStyle = c.panelSelected;
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(cx - 5, cy);
-      ctx.lineTo(cx + 5, cy);
-      ctx.moveTo(cx, cy - 5);
-      ctx.lineTo(cx, cy + 5);
-      ctx.stroke();
+    drawCross(ctx, cx, cy, c.panelSelected);
+  }
+
+  if (state.walk) {
+    const [wx, wy] = cellCentre(state.walk.x, state.walk.y);
+    drawGlow(ctx, c.panelDim, 0, () => {
+      ctx.strokeStyle = c.panelDim;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(wx - 3, wy - 3, 6, 6);
     });
   }
 
-  // The robot is always at the centre cell; the ground moves around it.
-  const mx = x + w / 2;
-  const my = y + h / 2;
-  const pulse = 1.2 * Math.sin(state.time * 4);
-  drawGlow(ctx, c.panelSelected, 6, () => {
-    ctx.strokeStyle = c.panelSelected;
-    ctx.fillStyle = c.panelSelected;
+  const rx = x + (state.pos.x + 0.5) * cellW;
+  const ry = y + (state.pos.y + 0.5) * cellH;
+  drawRobot(ctx, rx, ry, state.time, c.panelSelected);
+
+  drawText(ctx, "LOCAL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
+}
+
+function drawCross(ctx: CanvasRenderingContext2D, cx: number, cy: number, color: string): void {
+  drawGlow(ctx, color, 4, () => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 5, cy);
+    ctx.lineTo(cx + 5, cy);
+    ctx.moveTo(cx, cy - 5);
+    ctx.lineTo(cx, cy + 5);
+    ctx.stroke();
+  });
+}
+
+function drawRobot(ctx: CanvasRenderingContext2D, mx: number, my: number, time: number, color: string): void {
+  const pulse = 1.2 * Math.sin(time * 4);
+  drawGlow(ctx, color, 6, () => {
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(mx, my, 7 + pulse, 0, Math.PI * 2);
@@ -290,8 +306,6 @@ function drawLocalMap(
     ctx.closePath();
     ctx.fill();
   });
-
-  drawText(ctx, "LOCAL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
 }
 
 /** Plain square for a building kind whose art is not designed yet. */

@@ -58,12 +58,3 @@ export function isConnected(map: NetworkMap): boolean {
   return seen.size === map.nodes.length;
 }
 
-/** The nodes directly linked to a node, in ascending order. */
-export function neighboursOf(node: number, map: NetworkMap): number[] {
-  const out: number[] = [];
-  for (const [a, b] of map.links) {
-    if (a === node) out.push(b);
-    else if (b === node) out.push(a);
-  }
-  return out.sort((x, y) => x - y);
-}
