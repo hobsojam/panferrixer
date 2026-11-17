@@ -159,6 +159,10 @@ function drawMapReadout(ctx: CanvasRenderingContext2D, state: DashboardState, cf
 function drawSelectedReadout(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, x: number): void {
   const c = cfg.colors;
   const verb = selectedVerb(state);
+  if (verb === "scan") {
+    drawScanReadout(ctx, state, cfg, x);
+    return;
+  }
   const available = AVAILABLE_VERBS.includes(verb);
   drawText(ctx, "SELECTED", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
   drawText(ctx, VERB_LABELS[verb], x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
@@ -276,6 +280,10 @@ function drawLocalMap(
   const targeting = state.mode === "targeting";
   world.targets.forEach((t, index) => {
     const [tx, ty] = toScreen(t.col, t.row);
+    if (state.ruins.includes(index)) {
+      drawRuin(ctx, tx, ty, c.panelDim);
+      return;
+    }
     const inRange = targeting && state.target === index;
     const color = inRange ? c.panelSelected : c.text;
     const iconWidth = cfg.dashboard.targetIconWidth;
@@ -408,6 +416,35 @@ function drawRobot(ctx: CanvasRenderingContext2D, mx: number, my: number, time: 
 }
 
 /** Plain square for a building kind whose art is not designed yet. */
+function drawScanReadout(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, x: number): void {
+  const c = cfg.colors;
+  drawText(ctx, "SCAN", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
+  const result = state.scan;
+  if (result === null) {
+    drawText(ctx, "SPACE TO SCAN", x + 14, PANEL_TOP + 180, 16, c.panelSelected, 1, "monospace", "left");
+  } else if (result.kind === "none") {
+    drawText(ctx, "NOTHING DETECTED", x + 14, PANEL_TOP + 180, 16, c.panelDim, 1, "monospace", "left");
+  } else {
+    drawText(ctx, `BEARING ${result.bearing}`, x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
+    drawText(ctx, result.close ? "CLOSE" : "FAR", x + 14, PANEL_TOP + 204, 13, c.energy, 1, "monospace", "left");
+  }
+  drawText(ctx, `DROPS FOUND ${state.found.length}`, x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
+}
+
+/** A destroyed building: two crossed lines, dim. */
+function drawRuin(ctx: CanvasRenderingContext2D, cx: number, cy: number, color: string): void {
+  ctx.globalAlpha = 0.6;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 4, cy - 2);
+  ctx.lineTo(cx + 4, cy + 2);
+  ctx.moveTo(cx + 4, cy - 2);
+  ctx.lineTo(cx - 4, cy + 2);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
 function drawPlaceholderMarker(ctx: CanvasRenderingContext2D, cx: number, cy: number, color: string, glow: boolean): void {
   drawGlow(ctx, color, glow ? 6 : 0, () => {
     ctx.strokeStyle = color;

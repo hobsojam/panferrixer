@@ -15,6 +15,7 @@ export interface LocalMapConfig {
   valleyBelow: number; // raw height below this is a valley
   highAbove: number; // raw height above this is high ground
   targetsPerTown: number;
+  dropChance: number; // chance that a building holds a drop
   viewCols: number; // the mini map's local window
   viewRows: number;
 }
@@ -38,6 +39,7 @@ export interface Target {
   col: number;
   row: number;
   kind: TargetKind;
+  hasDrop: boolean; // the drop is hidden under the building; found only once it is destroyed
 }
 
 export interface World {
@@ -186,7 +188,8 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
       if (map.tiers[row][col] === 0) continue;
       if (targets.some((t) => t.col === col && t.row === row)) continue;
       const kind = TARGET_KINDS[Math.floor(rng() * TARGET_KINDS.length)];
-      targets.push({ col, row, kind });
+      const hasDrop = rng() < cfg.dropChance;
+      targets.push({ col, row, kind, hasDrop });
       placed += 1;
     }
   }

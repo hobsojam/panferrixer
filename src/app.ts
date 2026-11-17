@@ -1,5 +1,5 @@
 import type { Config } from "./config";
-import { createDashboardState, leaveTargeting, stepDashboard, worldFor, type Action, type DashboardState } from "./dashboard";
+import { createDashboardState, leaveTargeting, markRuin, stepDashboard, worldFor, type Action, type DashboardState } from "./dashboard";
 import { createInitialState, updateFlight } from "./flight";
 import type { Target } from "./local-map";
 import type { FlightState } from "./types";
@@ -10,7 +10,7 @@ import type { FlightState } from "./types";
  */
 export type AppState =
   | { screen: "dashboard"; dashboard: DashboardState }
-  | { screen: "flight"; dashboard: DashboardState; flight: FlightState; target: Target };
+  | { screen: "flight"; dashboard: DashboardState; flight: FlightState; target: Target; targetIndex: number };
 
 export interface AppInput {
   actions: readonly Action[]; // discrete presses this step; ignored during flight
@@ -34,13 +34,15 @@ export function updateApp(
   newSeed: () => number
 ): AppState {
   if (state.screen === "dashboard") {
-    const step = stepDashboard(state.dashboard, input.actions, dt, worldFor(cfg));
+    const world = worldFor(cfg);
+    const step = stepDashboard(state.dashboard, input.actions, dt, world);
     if (step.fire) {
       return {
         screen: "flight",
         dashboard: step.state,
         flight: createInitialState(newSeed(), cfg),
         target: step.fire,
+        targetIndex: world.targets.indexOf(step.fire),
       };
     }
     return { screen: "dashboard", dashboard: step.state };
@@ -48,7 +50,10 @@ export function updateApp(
 
   // Flight: presses are ignored, so a key tapped mid-flight cannot skip the result.
   if (isResult(state.flight.phase) && input.actions.includes("activate")) {
-    return { screen: "dashboard", dashboard: leaveTargeting(state.dashboard) };
+    const back = leaveTargeting(state.dashboard);
+    // A hit destroys the building: it becomes a ruin, and any drop under it can now be found.
+    const dashboard = state.flight.phase === "hit" ? markRuin(back, state.targetIndex) : back;
+    return { screen: "dashboard", dashboard };
   }
   return {
     ...state,

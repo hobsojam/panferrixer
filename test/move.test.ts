@@ -15,6 +15,9 @@ const flatWorld: World = {
   targets: [],
   range: config.dashboard.targetRange,
   walkSpeed: config.dashboard.walkSpeed,
+  pickupRadius: config.dashboard.pickupRadius,
+  blipRadius: config.dashboard.blipRadius,
+  directionRadius: config.dashboard.directionRadius,
 };
 
 function step(state: DashboardState, actions: Action[], dt = DT, w: World = flatWorld): DashboardState {
