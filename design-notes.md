@@ -180,7 +180,7 @@ Very high scores (for example 96% in one Spectrum review). Praise: depth, the wi
 ### 4.2 Scanner redesign
 Manual and author agree on how the original works: the scanner is used after destroying a dome, standing in the ruins, and anything it shows is picked up automatically.
 
-**Decided [Author-direction]:** nothing about a building's contents can be found before it is destroyed. Drops and parts are only findable after the building is gone, either lying where the missile hit or uncovered when the building falls. Scanning in advance is not allowed, so the unknown contents are part of the loot-box pull. The rest of this section is the earlier proposal, which assumed some pre-fire scanning and needs revising to match.
+**Under discussion [Author]:** nothing about a building's contents can be found before it is destroyed, so the unknown contents are part of the loot-box pull. Drops and parts are only findable after the building is gone, either lying where the missile hit or uncovered when the building falls. The rest of this section is the earlier proposal, which assumed some pre-fire scanning and needs revising once this is settled.
 
 The proposal gives it a different job:
 - A ping with a radius, shown on the map, with the radius as an upgrade stat.
