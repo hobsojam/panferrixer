@@ -1,11 +1,13 @@
 import type { Config } from "./config";
+import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
+import type { TargetKind } from "./local-map";
 import type { FlightState } from "./types";
 
 // Horizontal lines run past the canvas so banking never exposes a bare corner.
 const OVERSCAN = 0.35;
 
 /** Pure drawing: reads state and config, never mutates either. */
-export function render(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config): void {
+export function render(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config, targetKind: TargetKind | null = null): void {
   const { width: w, height: h } = cfg.canvas;
   const horizonY = h * 0.55;
 
@@ -30,7 +32,7 @@ export function render(ctx: CanvasRenderingContext2D, state: FlightState, cfg: C
   }
 
   if (state.phase === "terminal" || state.phase === "hit") {
-    drawTarget(ctx, state, cfg, horizonY);
+    drawTarget(ctx, state, cfg, horizonY, targetKind);
   }
 
   if (state.phase === "hit") {
@@ -145,8 +147,14 @@ function targetAnchor(state: FlightState, cfg: Config, horizonY: number): { cent
   };
 }
 
-function drawTarget(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config, horizonY: number): void {
+function drawTarget(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config, horizonY: number, kind: TargetKind | null): void {
   const { centerX, centerY, size } = targetAnchor(state, cfg, horizonY);
+
+  if (kind && hasArt(kind)) {
+    // Terminal phase: the chosen building is drawn in full detail, standing on the ground (base at the horizon).
+    strokeArt(ctx, BUILDING_ART[kind]!.full, centerX, horizonY, size / 2, cfg.colors.target, 2, 8);
+    return;
+  }
 
   drawGlow(ctx, cfg.colors.target, 8, () => {
     ctx.strokeStyle = cfg.colors.target;

@@ -57,3 +57,4 @@ export function isConnected(map: NetworkMap): boolean {
   }
   return seen.size === map.nodes.length;
 }
+

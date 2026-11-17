@@ -1,15 +1,16 @@
 import type { Config } from "./config";
-import { createDashboardState, stepDashboard, type Action, type DashboardState } from "./dashboard";
+import { createDashboardState, leaveTargeting, stepDashboard, worldFor, type Action, type DashboardState } from "./dashboard";
 import { createInitialState, updateFlight } from "./flight";
+import type { Target } from "./local-map";
 import type { FlightState } from "./types";
 
 /**
  * The two screens. The dashboard is persistent: a missile flight is opened from
- * it and returns to it, keeping the dashboard's selection and time.
+ * it and returns to it, keeping the dashboard's selection and location.
  */
 export type AppState =
   | { screen: "dashboard"; dashboard: DashboardState }
-  | { screen: "flight"; dashboard: DashboardState; flight: FlightState };
+  | { screen: "flight"; dashboard: DashboardState; flight: FlightState; target: Target };
 
 export interface AppInput {
   actions: readonly Action[]; // discrete presses this step; ignored during flight
@@ -33,16 +34,21 @@ export function updateApp(
   newSeed: () => number
 ): AppState {
   if (state.screen === "dashboard") {
-    const step = stepDashboard(state.dashboard, input.actions, dt);
-    if (step.launchMissile) {
-      return { screen: "flight", dashboard: step.state, flight: createInitialState(newSeed(), cfg) };
+    const step = stepDashboard(state.dashboard, input.actions, dt, worldFor(cfg));
+    if (step.fire) {
+      return {
+        screen: "flight",
+        dashboard: step.state,
+        flight: createInitialState(newSeed(), cfg),
+        target: step.fire,
+      };
     }
     return { screen: "dashboard", dashboard: step.state };
   }
 
   // Flight: presses are ignored, so a key tapped mid-flight cannot skip the result.
   if (isResult(state.flight.phase) && input.actions.includes("activate")) {
-    return { screen: "dashboard", dashboard: state.dashboard };
+    return { screen: "dashboard", dashboard: leaveTargeting(state.dashboard) };
   }
   return {
     ...state,

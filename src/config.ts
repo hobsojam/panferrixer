@@ -108,16 +108,25 @@ export const config = {
     tracePoints: 120,
     formName: "PROTOTYPE", // placeholder for the robot form shown in the name bar
     startNode: 0, // index into the network map where the robot begins
+    targetRange: 2, // in map cells, Chebyshev distance from the cross: a target is only selected this close
+    walkSpeed: 3, // cells per second the robot walks across its local patch
+    targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
 
-  // Local view: a patch of ground around the robot, for the dashboard mini map (design-notes 2.7).
+  // The whole map: one terrain grid with a town at each network node (design-notes 4.6).
+  // The mini map shows a window of it centred on the robot (design-notes 2.7).
   localMap: {
     worldSeed: 7,
-    cols: 25,
-    rows: 11,
+    cols: 75, // about the size of the reference map: towns are near each other but distinct
+    rows: 45,
+    townRadiusCols: 7,
+    townRadiusRows: 4,
     smoothingPasses: 2,
     valleyBelow: 0.46,
     highAbove: 0.54,
+    targetsPerTown: 3,
+    viewCols: 25, // the mini map's local window, in cells
+    viewRows: 11,
   },
 
   colors: {
