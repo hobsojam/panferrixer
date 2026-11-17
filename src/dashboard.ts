@@ -76,6 +76,10 @@ export interface DashboardState {
   pulseStarted: number | null; // dashboard time of the last scan, for the ring drawn on the mini map
   // What the cross is choosing for: a missile target (any building), or a power station to cut.
   purpose: "missile" | "gridDisable";
+  // Hunters (target indices) that have seen the robot on a scan and will open fire when it is close.
+  alerted: number[];
+  // Hits taken on the top shield plate so far. A plate goes when it reaches hitsPerPlate.
+  shieldHits: number;
 }
 
 export interface DashboardStep {
@@ -131,6 +135,8 @@ export function createDashboardState(cfg: Config): DashboardState {
     gridReadyAt: 0,
     pulseStarted: null,
     purpose: "missile",
+    alerted: [],
+    shieldHits: 0,
   };
 }
 
@@ -150,7 +156,7 @@ export function isSuppressed(state: DashboardState, network: number): boolean {
  * building even if the window closes during its flight. A power station has no shield.
  */
 export function isShielded(state: DashboardState, target: Target): boolean {
-  if (target.kind === "power") return false;
+  if (target.kind === "power" || target.kind === "hunter") return false;
   return !isSuppressed(state, networkOf(target));
 }
 
@@ -158,6 +164,43 @@ export function isShielded(state: DashboardState, target: Target): boolean {
 export function openWindow(state: DashboardState, network: number, world: World): DashboardState {
   const until = state.time + world.suppressionSeconds;
   return { ...state, suppressedUntil: { ...state.suppressedUntil, [network]: Math.max(until, state.suppressedUntil[network] ?? 0) } };
+}
+
+/** A scan's ring alerts every living hunter it reaches. Alerted hunters stay alerted until they engage. */
+export function alertHunters(s: DashboardState, world: World): number[] {
+  const found = new Set(s.alerted);
+  world.targets.forEach((t, index) => {
+    if (t.kind !== "hunter" || s.ruins.includes(index)) return;
+    if (distanceTo(s.pos, t.col, t.row) <= world.directionRadius) found.add(index);
+  });
+  return [...found];
+}
+
+/**
+ * The first alerted hunter that is close enough to open fire, or null. A hunter that
+ * has been destroyed cannot fire.
+ */
+export function hunterInRange(s: DashboardState, world: World, range: number): number | null {
+  for (const index of s.alerted) {
+    const t = world.targets[index];
+    if (!t || t.kind !== "hunter" || s.ruins.includes(index)) continue;
+    if (distanceTo(s.pos, t.col, t.row) <= range) return index;
+  }
+  return null;
+}
+
+/** Applies missile hits to the shields: each plate absorbs hitsPerPlate hits, then breaks. */
+export function applyShieldHits(s: DashboardState, hits: number, hitsPerPlate: number): DashboardState {
+  let plates = s.shieldPlates;
+  let shieldHits = s.shieldHits;
+  for (let i = 0; i < hits && plates > 0; i++) {
+    shieldHits += 1;
+    if (shieldHits >= hitsPerPlate) {
+      plates -= 1;
+      shieldHits = 0;
+    }
+  }
+  return { ...s, shieldPlates: plates, shieldHits };
 }
 
 /** Grid disable is ready once its cooldown has passed. */
@@ -264,7 +307,7 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
       return { ...s, mode: "moving", cross };
     }
-    if (verb === "scan") return { ...s, scan: scanFrom(s, world), pulseStarted: s.time };
+    if (verb === "scan") return { ...s, scan: scanFrom(s, world), pulseStarted: s.time, alerted: alertHunters(s, world) };
     if (verb === "gridDisable" && gridDisableReady(s)) {
       // Choose a power station with the cross, the same way as a missile target.
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };

@@ -161,7 +161,8 @@ const COMMS_CENTRE: BuildingArt = {
 };
 
 /** Art for each building kind. Every target kind now has art. */
-export const BUILDING_ART: Record<TargetKind, BuildingArt> = {
+// The hunter has no art yet, so it is drawn with the placeholder marker.
+export const BUILDING_ART: Partial<Record<TargetKind, BuildingArt>> = {
   dome: DOME,
   power: POWER,
   mine: MINE,

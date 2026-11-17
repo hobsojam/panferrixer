@@ -2,6 +2,7 @@ import { createAppState, updateApp, type AppState } from "./app";
 import { config } from "./config";
 import type { Action } from "./dashboard";
 import { renderDashboard } from "./dashboard-render";
+import { renderDefence } from "./defence-render";
 import { InputController } from "./input";
 import { render } from "./render";
 import { SoundPlayer, eventsBetween } from "./sound";
@@ -43,6 +44,8 @@ function frame(now: number): void {
 
   if (state.screen === "dashboard") {
     renderDashboard(ctx!, state.dashboard, config, !sound.isMuted());
+  } else if (state.screen === "defence") {
+    renderDefence(ctx!, state.defence, state.dashboard.shieldPlates, config);
   } else {
     render(ctx!, state.flight, config, state.target.kind, state.shielded);
   }
