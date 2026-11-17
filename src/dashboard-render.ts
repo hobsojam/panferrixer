@@ -294,15 +294,6 @@ function drawLocalMap(
   }
 
   if (state.route.length > 0) {
-    ctx.globalAlpha = 0.6;
-    ctx.fillStyle = c.panelSelected;
-    for (const cell of state.route) {
-      const [rx, ry] = toScreen(cell.x, cell.y);
-      ctx.beginPath();
-      ctx.arc(rx, ry, 1.2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
     const destination = state.route[state.route.length - 1];
     const [wx, wy] = toScreen(destination.x, destination.y);
     drawGlow(ctx, c.panelSelected, 0, () => {
