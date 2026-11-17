@@ -144,8 +144,8 @@ describe("the attack from the app", () => {
     // Shield points left: each plate is worth hitsPerPlate, less the hits on the top plate.
     const pointsLeft = state.dashboard.shieldPlates * config.dashboard.hitsPerPlate - state.dashboard.shieldHits;
     expect(config.dashboard.shieldPlates * config.dashboard.hitsPerPlate - pointsLeft).toBe(total);
-    // The alert is used up by the attack.
-    expect(state.dashboard.alerted).not.toContain(hunterIndex);
+    // The alert stays: the hunter keeps coming until it leaves its leash or dies.
+    expect(state.dashboard.alerted).toContain(hunterIndex);
   });
 
   it("no attack without an alert", () => {

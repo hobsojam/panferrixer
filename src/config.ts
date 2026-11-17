@@ -134,6 +134,10 @@ export const config = {
     scanPulseSeconds: 1.2, // how long a scan's ring takes to reach its full radius on the mini map
     hitsPerPlate: 3, // design-notes 4.9: each shield plate absorbs three missile hits
     hunterEngageRange: 6, // in map cells: an alerted hunter opens fire when the robot is this close
+    // Placeholders for hunter behaviour (design-notes 4.10 and 4.14). Tuned by playtest.
+    hunterSpeed: 2, // cells per second when it moves
+    hunterLeashCells: 30, // how far from its post an alerted hunter will chase before it gives up (about two towns)
+    hunterReloadSeconds: 12, // time between one attack and the next from the same hunter
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
 

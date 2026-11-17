@@ -6,6 +6,7 @@ import {
   isShielded,
   leaveTargeting,
   markRuin,
+  moveHunters,
   networkOf,
   openWindow,
   stepDashboard,
@@ -53,32 +54,38 @@ export function updateApp(
 
   if (state.screen === "dashboard") {
     const step = stepDashboard(state.dashboard, input.actions, dt, world);
+    // Hunters move in real time, on every screen, so they keep coming during a flight or an attack.
+    const dashboard = moveHunters(step.state, world, dt);
     if (step.fire) {
       return {
         screen: "flight",
-        dashboard: step.state,
+        dashboard,
         flight: createInitialState(newSeed(), cfg),
         target: step.fire,
         targetIndex: world.targets.indexOf(step.fire),
-        shielded: isShielded(step.state, step.fire),
+        shielded: isShielded(dashboard, step.fire),
       };
     }
-    // An alerted hunter that is close enough opens fire. Its alert is used up by the attack.
-    const hunter = hunterInRange(step.state, world, cfg.dashboard.hunterEngageRange);
+    // An alerted hunter that is close enough, and ready again, opens fire. Its alert stays,
+    // so it keeps coming after the attack until it leaves its leash or dies.
+    const hunter = hunterInRange(dashboard, world, cfg.dashboard.hunterEngageRange);
     if (hunter !== null) {
-      const dashboard = { ...step.state, alerted: step.state.alerted.filter((i) => i !== hunter) };
-      return { screen: "defence", dashboard, defence: createDefence(newSeed(), cfg) };
+      const readied: DashboardState = {
+        ...dashboard,
+        hunterReadyAt: { ...dashboard.hunterReadyAt, [hunter]: dashboard.time + world.hunterReloadSeconds },
+      };
+      return { screen: "defence", dashboard: readied, defence: createDefence(newSeed(), cfg) };
     }
-    return { screen: "dashboard", dashboard: step.state };
+    return { screen: "dashboard", dashboard };
   }
 
   if (state.screen === "defence") {
-    // The shield clock runs during an attack, as it does during a flight.
-    const dashboard: DashboardState = { ...state.dashboard, time: state.dashboard.time + dt };
+    // The shield clock and the hunters run during an attack, as they do during a flight.
+    const timed = moveHunters({ ...state.dashboard, time: state.dashboard.time + dt }, world, dt);
     const defence = stepDefence(state.defence, input.steering, input.actions.includes("activate"), dt, cfg);
-    if (!defence.done) return { screen: "defence", dashboard, defence };
+    if (!defence.done) return { screen: "defence", dashboard: timed, defence };
     // The attack is over: every missile that got through is a hit on the shields.
-    const hit = applyShieldHits(dashboard, hitCount(defence), cfg.dashboard.hitsPerPlate);
+    const hit = applyShieldHits(timed, hitCount(defence), cfg.dashboard.hitsPerPlate);
     return { screen: "dashboard", dashboard: hit };
   }
 
@@ -93,12 +100,12 @@ export function updateApp(
   }
 
   // The shield clock runs in real time, so it keeps running while a missile is in the air.
-  const dashboard: DashboardState = { ...state.dashboard, time: state.dashboard.time + dt };
+  const timed: DashboardState = moveHunters({ ...state.dashboard, time: state.dashboard.time + dt }, world, dt);
   const flight = updateFlight(state.flight, input.steering, dt, cfg);
 
   // A hit on a power station takes its network's shields down. The station itself survives.
   if (flight.phase === "hit" && state.flight.phase !== "hit" && state.target.kind === "power") {
-    return { ...state, dashboard: openWindow(dashboard, networkOf(state.target), world), flight };
+    return { ...state, dashboard: openWindow(timed, networkOf(state.target), world), flight };
   }
-  return { ...state, dashboard, flight };
+  return { ...state, dashboard: timed, flight };
 }
