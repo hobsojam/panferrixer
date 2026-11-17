@@ -107,6 +107,17 @@ export const config = {
     lowThreshold: 2, // at or below this many cells or plates, the last one flashes and the trace agitates
     tracePoints: 120,
     formName: "PROTOTYPE", // placeholder for the robot form shown in the name bar
+    startNode: 0, // index into the network map where the robot begins
+  },
+
+  // Local view: a patch of ground around the robot, for the dashboard mini map (design-notes 2.7).
+  localMap: {
+    worldSeed: 7,
+    cols: 25,
+    rows: 11,
+    smoothingPasses: 2,
+    valleyBelow: 0.46,
+    highAbove: 0.54,
   },
 
   colors: {

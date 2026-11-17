@@ -1,6 +1,7 @@
 import type { Config } from "./config";
 import { AVAILABLE_VERBS, VERB_GRID, isLow, selectedVerb, type DashboardState, type Verb } from "./dashboard";
 import { drawGlow } from "./render";
+import { generateLocalMap, type LocalMap } from "./local-map";
 
 const VERB_LABELS: Record<Verb, string> = {
   move: "MOVE",
@@ -105,26 +106,105 @@ function drawDetailPanel(ctx: CanvasRenderingContext2D, state: DashboardState, c
   const c = cfg.colors;
   const x = 700;
   const width = 240;
+  const height = PANEL_BOTTOM - PANEL_TOP;
   const verb = selectedVerb(state);
   const available = AVAILABLE_VERBS.includes(verb);
 
-  drawPanelFrame(ctx, x, PANEL_TOP, width, PANEL_BOTTOM - PANEL_TOP, c.panelDim);
-  drawText(ctx, "SELECTED", x + 14, PANEL_TOP + 22, 12, c.text, 0.7, "monospace", "left");
-  drawText(ctx, VERB_LABELS[verb], x + 14, PANEL_TOP + 52, 20, c.panelSelected, 1, "monospace", "left");
+  drawPanelFrame(ctx, x, PANEL_TOP, width, height, c.panelDim);
+  drawLocalMap(ctx, state, cfg, x + 8, PANEL_TOP + 8, width - 16, 118);
+
+  ctx.strokeStyle = c.panelDim;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + 8, PANEL_TOP + 140);
+  ctx.lineTo(x + width - 8, PANEL_TOP + 140);
+  ctx.stroke();
+
+  drawText(ctx, "SELECTED", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
+  drawText(ctx, VERB_LABELS[verb], x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
   drawText(
     ctx,
     available ? "READY" : "NOT YET BUILT",
     x + 14,
-    PANEL_TOP + 90,
-    14,
+    PANEL_TOP + 204,
+    13,
     available ? c.energy : c.panelDim,
     1,
     "monospace",
     "left"
   );
   if (available) {
-    drawText(ctx, "SPACE TO FIRE", x + 14, PANEL_TOP + 116, 12, c.text, 0.7, "monospace", "left");
+    drawText(ctx, "SPACE TO FIRE", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
   }
+}
+
+let cachedLocal: { node: number; map: LocalMap } | null = null;
+
+/** The local patch for a node. Cached, since the same node is drawn every frame. */
+function localMapFor(node: number, cfg: Config): LocalMap {
+  if (!cachedLocal || cachedLocal.node !== node) {
+    cachedLocal = { node, map: generateLocalMap(node, cfg.localMap) };
+  }
+  return cachedLocal.map;
+}
+
+/**
+ * Local view: ground around the robot, with the robot fixed at the centre.
+ * Valleys are faint dots, ground is dots, high ground is filled.
+ */
+function drawLocalMap(
+  ctx: CanvasRenderingContext2D,
+  state: DashboardState,
+  cfg: Config,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): void {
+  const c = cfg.colors;
+  const map = localMapFor(state.location, cfg);
+  const cellW = w / map.cols;
+  const cellH = h / map.rows;
+
+  map.tiers.forEach((row, r) =>
+    row.forEach((tier, col) => {
+      const cx = x + col * cellW;
+      const cy = y + r * cellH;
+      if (tier === 2) {
+        ctx.globalAlpha = 0.45;
+        ctx.fillStyle = c.panelDim;
+        ctx.fillRect(cx + 1, cy + 1, cellW - 2, cellH - 2);
+      } else {
+        ctx.globalAlpha = tier === 1 ? 0.3 : 0.12;
+        ctx.fillStyle = c.panelDim;
+        ctx.beginPath();
+        ctx.arc(cx + cellW / 2, cy + cellH / 2, 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    })
+  );
+  ctx.globalAlpha = 1;
+
+  // The robot is always at the centre cell; the ground moves around it.
+  const mx = x + w / 2;
+  const my = y + h / 2;
+  const pulse = 1.2 * Math.sin(state.time * 4);
+  drawGlow(ctx, c.panelSelected, 6, () => {
+    ctx.strokeStyle = c.panelSelected;
+    ctx.fillStyle = c.panelSelected;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(mx, my, 7 + pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(mx, my - 4);
+    ctx.lineTo(mx + 3, my + 3);
+    ctx.lineTo(mx - 3, my + 3);
+    ctx.closePath();
+    ctx.fill();
+  });
+
+  drawText(ctx, "LOCAL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
 }
 
 /**
