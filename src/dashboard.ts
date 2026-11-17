@@ -1,7 +1,8 @@
 import type { Config } from "./config";
+import { NETWORK, neighboursOf } from "./map";
 import { generateLocalMap, targetsFor, type LocalMap, type Target } from "./local-map";
 
-/** The four verbs from design-notes 4.6. Only "missile" does anything in this slice. */
+/** The four verbs from design-notes 4.6. Missile and Move work; scan and grid disable do not yet. */
 export type Verb = "move" | "scan" | "missile" | "gridDisable";
 
 export type Action = "up" | "down" | "left" | "right" | "activate" | "cancel";
@@ -12,18 +13,25 @@ export const VERB_GRID: readonly (readonly Verb[])[] = [
   ["missile", "gridDisable"],
 ];
 
-export const AVAILABLE_VERBS: readonly Verb[] = ["missile"];
+export const AVAILABLE_VERBS: readonly Verb[] = ["move", "missile"];
 
 export interface Cross {
   col: number;
   row: number;
 }
 
-/** What the targeting cross can pick from, for the robot's current node. */
-export interface TargetingWorld {
+/** Everything the dashboard needs to know about the robot's current node. */
+export interface NodeWorld {
   map: LocalMap;
   targets: readonly Target[];
   range: number;
+  neighbours: readonly number[];
+  travelSeconds: number;
+}
+
+export interface TravelState {
+  to: number;
+  remaining: number; // seconds left
 }
 
 export interface DashboardState {
@@ -33,9 +41,11 @@ export interface DashboardState {
   shieldPlates: number;
   time: number; // seconds on the dashboard; drives the state-of-mind trace
   location: number; // index of the network node the robot is at
-  mode: "browse" | "targeting";
+  mode: "browse" | "targeting" | "moving";
   cross: Cross;
-  target: number | null; // index into the world's targets, when one is in range
+  target: number | null; // index into the node's targets, when one is in range
+  moveChoice: number; // index into the node's neighbours, while moving
+  travel: TravelState | null; // set while the robot is travelling to a node
 }
 
 export interface DashboardStep {
@@ -43,14 +53,20 @@ export interface DashboardStep {
   fire: Target | null; // set on the step where the player confirms a target
 }
 
-const worldCache = new Map<number, TargetingWorld>();
+const worldCache = new Map<number, NodeWorld>();
 
-/** The local patch and its targets for a node. Cached: the same node is asked for every frame. */
-export function worldFor(location: number, cfg: Config): TargetingWorld {
+/** The local patch, targets and links for a node. Cached: the same node is asked for every frame. */
+export function worldFor(location: number, cfg: Config): NodeWorld {
   let world = worldCache.get(location);
   if (!world) {
     const map = generateLocalMap(location, cfg.localMap);
-    world = { map, targets: targetsFor(location, map, cfg.localMap), range: cfg.dashboard.targetRange };
+    world = {
+      map,
+      targets: targetsFor(location, map, cfg.localMap),
+      range: cfg.dashboard.targetRange,
+      neighbours: neighboursOf(location, NETWORK),
+      travelSeconds: cfg.dashboard.travelSeconds,
+    };
     worldCache.set(location, world);
   }
   return world;
@@ -67,6 +83,8 @@ export function createDashboardState(cfg: Config): DashboardState {
     mode: "browse",
     cross: { col: Math.floor(cfg.localMap.cols / 2), row: Math.floor(cfg.localMap.rows / 2) },
     target: null,
+    moveChoice: 0,
+    travel: null,
   };
 }
 
@@ -74,14 +92,25 @@ export function selectedVerb(state: DashboardState): Verb {
   return VERB_GRID[state.row][state.col];
 }
 
-/** Pure: moves the selection, moves the cross while targeting, and reports a confirmed target. */
-export function stepDashboard(state: DashboardState, actions: readonly Action[], dt: number, world: TargetingWorld): DashboardStep {
+/**
+ * Pure: moves the selection, moves the cross, chooses a destination, runs travel,
+ * and reports a confirmed target. Input is ignored while travelling.
+ */
+export function stepDashboard(state: DashboardState, actions: readonly Action[], dt: number, world: NodeWorld): DashboardStep {
   let s: DashboardState = { ...state, time: state.time + dt };
-  let fire: Target | null = null;
 
+  if (s.travel) {
+    const remaining = s.travel.remaining - dt;
+    if (remaining > 0) return { state: { ...s, travel: { ...s.travel, remaining } }, fire: null };
+    return { state: { ...s, location: s.travel.to, travel: null, mode: "browse", target: null }, fire: null };
+  }
+
+  let fire: Target | null = null;
   for (const action of actions) {
     if (s.mode === "browse") {
       s = browseAction(s, action, world);
+    } else if (s.mode === "moving") {
+      s = movingAction(s, action, world);
     } else if (action === "cancel") {
       s = { ...s, mode: "browse", target: null };
     } else if (action === "activate") {
@@ -94,19 +123,41 @@ export function stepDashboard(state: DashboardState, actions: readonly Action[],
   return { state: s, fire };
 }
 
-function browseAction(s: DashboardState, action: Action, world: TargetingWorld): DashboardState {
+function browseAction(s: DashboardState, action: Action, world: NodeWorld): DashboardState {
   if (action === "up") return { ...s, row: Math.max(0, s.row - 1) };
   if (action === "down") return { ...s, row: Math.min(VERB_GRID.length - 1, s.row + 1) };
   if (action === "left") return { ...s, col: Math.max(0, s.col - 1) };
   if (action === "right") return { ...s, col: Math.min(VERB_GRID[s.row].length - 1, s.col + 1) };
-  if (action === "activate" && selectedVerb(s) === "missile") {
-    const cross = { col: Math.floor(world.map.cols / 2), row: Math.floor(world.map.rows / 2) };
-    return { ...s, mode: "targeting", cross, target: nearestTarget(cross, world) };
+  if (action === "activate") {
+    const verb = selectedVerb(s);
+    if (verb === "missile") {
+      const cross = { col: Math.floor(world.map.cols / 2), row: Math.floor(world.map.rows / 2) };
+      return { ...s, mode: "targeting", cross, target: nearestTarget(cross, world) };
+    }
+    if (verb === "move" && world.neighbours.length > 0) {
+      return { ...s, mode: "moving", moveChoice: 0 };
+    }
   }
   return s;
 }
 
-function moveCross(s: DashboardState, action: Action, world: TargetingWorld): DashboardState {
+function movingAction(s: DashboardState, action: Action, world: NodeWorld): DashboardState {
+  if (action === "cancel") return { ...s, mode: "browse" };
+  if (action === "left" || action === "up") return { ...s, moveChoice: Math.max(0, s.moveChoice - 1) };
+  if (action === "right" || action === "down") {
+    return { ...s, moveChoice: Math.min(world.neighbours.length - 1, s.moveChoice + 1) };
+  }
+  if (action === "activate") {
+    return {
+      ...s,
+      mode: "browse",
+      travel: { to: world.neighbours[s.moveChoice], remaining: world.travelSeconds },
+    };
+  }
+  return s;
+}
+
+function moveCross(s: DashboardState, action: Action, world: NodeWorld): DashboardState {
   const dCol = action === "left" ? -1 : action === "right" ? 1 : 0;
   const dRow = action === "up" ? -1 : action === "down" ? 1 : 0;
   const cross = {
@@ -117,7 +168,7 @@ function moveCross(s: DashboardState, action: Action, world: TargetingWorld): Da
 }
 
 /** The target closest to the cross within range; ties go to the earlier target. */
-export function nearestTarget(cross: Cross, world: TargetingWorld): number | null {
+export function nearestTarget(cross: Cross, world: NodeWorld): number | null {
   let best: number | null = null;
   let bestDistance = Infinity;
   world.targets.forEach((t, index) => {

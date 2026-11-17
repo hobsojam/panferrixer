@@ -1,7 +1,7 @@
-import type { Config } from "./config";
-import { AVAILABLE_VERBS, VERB_GRID, isLow, selectedVerb, worldFor, type DashboardState, type TargetingWorld, type Verb } from "./dashboard";
-import type { Target } from "./local-map";
 import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
+import type { Config } from "./config";
+import { AVAILABLE_VERBS, VERB_GRID, isLow, selectedVerb, worldFor, type DashboardState, type NodeWorld, type Verb } from "./dashboard";
+import type { Target } from "./local-map";
 import { drawGlow } from "./render";
 
 const VERB_LABELS: Record<Verb, string> = {
@@ -34,13 +34,18 @@ export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardS
   drawGauge(ctx, "ENERGY", state.energyCells, cfg.dashboard.energyCells, 330, cfg, "cell", state.time);
   drawGauge(ctx, "SHIELDS", state.shieldPlates, cfg.dashboard.shieldPlates, 384, cfg, "plate", state.time);
 
-  const hint =
-    state.mode === "targeting" ? "ARROWS MOVE CROSS     SPACE FIRE     ESC CANCEL" : "ARROWS SELECT     SPACE ACTIVATE";
-  drawText(ctx, hint, w / 2, h - 28, 14, c.text, 0.8, "monospace");
+  drawText(ctx, hintFor(state), w / 2, h - 28, 14, c.text, 0.8, "monospace");
 
   ctx.strokeStyle = c.frame;
   ctx.lineWidth = 4;
   ctx.strokeRect(2, 2, w - 4, h - 4);
+}
+
+function hintFor(state: DashboardState): string {
+  if (state.travel) return "TRAVELLING";
+  if (state.mode === "targeting") return "ARROWS MOVE CROSS     SPACE FIRE     ESC CANCEL";
+  if (state.mode === "moving") return "ARROWS CHOOSE NODE     SPACE TRAVEL     ESC CANCEL";
+  return "ARROWS SELECT     SPACE ACTIVATE";
 }
 
 const PANEL_TOP = 70;
@@ -113,8 +118,8 @@ function drawVerbGrid(ctx: CanvasRenderingContext2D, state: DashboardState, cfg:
   });
 }
 
-/** The right-hand panel: the local view on top, and a readout beneath it that depends on the mode. */
-function drawSidePanel(ctx: CanvasRenderingContext2D, state: DashboardState, world: TargetingWorld, cfg: Config): void {
+/** The right-hand panel: the local view on top, and a readout beneath it that depends on what the robot is doing. */
+function drawSidePanel(ctx: CanvasRenderingContext2D, state: DashboardState, world: NodeWorld, cfg: Config): void {
   const c = cfg.colors;
   const x = 700;
   const width = 240;
@@ -130,11 +135,19 @@ function drawSidePanel(ctx: CanvasRenderingContext2D, state: DashboardState, wor
   ctx.lineTo(x + width - 8, PANEL_TOP + 140);
   ctx.stroke();
 
-  if (state.mode === "targeting") {
+  if (state.travel) {
+    drawTravelReadout(ctx, state, cfg, x);
+  } else if (state.mode === "targeting") {
     drawTargetingReadout(ctx, state, world, cfg, x);
-    return;
+  } else if (state.mode === "moving") {
+    drawMovingReadout(ctx, state, world, cfg, x);
+  } else {
+    drawSelectedReadout(ctx, state, cfg, x);
   }
+}
 
+function drawSelectedReadout(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, x: number): void {
+  const c = cfg.colors;
   const verb = selectedVerb(state);
   const available = AVAILABLE_VERBS.includes(verb);
   drawText(ctx, "SELECTED", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
@@ -151,11 +164,30 @@ function drawSidePanel(ctx: CanvasRenderingContext2D, state: DashboardState, wor
     "left"
   );
   if (available) {
-    drawText(ctx, "SPACE TO FIRE", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
+    const prompt = verb === "move" ? "SPACE TO CHOOSE A NODE" : "SPACE TO FIRE";
+    drawText(ctx, prompt, x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
   }
 }
 
-function drawTargetingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, world: TargetingWorld, cfg: Config, x: number): void {
+function drawMovingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, world: NodeWorld, cfg: Config, x: number): void {
+  const c = cfg.colors;
+  const destination = world.neighbours[state.moveChoice];
+  drawText(ctx, "MOVE TO", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
+  drawText(ctx, `NODE ${destination + 1}`, x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
+  drawText(ctx, `${state.moveChoice + 1} OF ${world.neighbours.length} LINKS`, x + 14, PANEL_TOP + 204, 13, c.energy, 1, "monospace", "left");
+  drawText(ctx, "SPACE TO TRAVEL", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
+}
+
+function drawTravelReadout(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, x: number): void {
+  const c = cfg.colors;
+  const travel = state.travel;
+  if (!travel) return;
+  drawText(ctx, "TRAVELLING", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
+  drawText(ctx, `TO NODE ${travel.to + 1}`, x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
+  drawText(ctx, `${travel.remaining.toFixed(1)} S LEFT`, x + 14, PANEL_TOP + 204, 13, c.energy, 1, "monospace", "left");
+}
+
+function drawTargetingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, world: NodeWorld, cfg: Config, x: number): void {
   const c = cfg.colors;
   const target = state.target === null ? null : world.targets[state.target];
 
@@ -172,13 +204,14 @@ function drawTargetingReadout(ctx: CanvasRenderingContext2D, state: DashboardSta
 
 /**
  * Local view: ground around the robot, with the robot fixed at the centre.
- * Valleys are faint dots, ground is dots, high ground is filled. While targeting,
- * the targets are marked and the cross shows where the pointer is.
+ * Valleys are faint dots, ground is dots, high ground is filled. Buildings are
+ * always shown. While targeting, the cross shows where the player is pointing and
+ * the target in range is highlighted.
  */
 function drawLocalMap(
   ctx: CanvasRenderingContext2D,
   state: DashboardState,
-  world: TargetingWorld,
+  world: NodeWorld,
   cfg: Config,
   x: number,
   y: number,
@@ -210,22 +243,22 @@ function drawLocalMap(
   );
   ctx.globalAlpha = 1;
 
-  if (state.mode === "targeting") {
-    world.targets.forEach((t, index) => {
-      const [tx, ty] = cellCentre(t.col, t.row);
-      const inRange = state.target === index;
-      ctx.globalAlpha = inRange ? 1 : 0.6;
-      const iconWidth = cfg.dashboard.targetIconWidth;
-      const color = inRange ? c.panelSelected : c.text;
-      if (hasArt(t.kind)) {
-        strokeArt(ctx, BUILDING_ART[t.kind]!.simple, tx, ty + iconWidth / 4, iconWidth / 2, color, 1.2, inRange ? 6 : 0);
-      } else {
-        drawPlaceholderMarker(ctx, tx, ty, color, inRange);
-      }
-      ctx.globalAlpha = 1;
-    });
+  const targeting = state.mode === "targeting";
+  world.targets.forEach((t, index) => {
+    const [tx, ty] = cellCentre(t.col, t.row);
+    const inRange = targeting && state.target === index;
+    const color = inRange ? c.panelSelected : c.text;
+    const iconWidth = cfg.dashboard.targetIconWidth;
+    ctx.globalAlpha = targeting && !inRange ? 0.6 : 1;
+    if (hasArt(t.kind)) {
+      strokeArt(ctx, BUILDING_ART[t.kind].simple, tx, ty + iconWidth / 4, iconWidth / 2, color, 1.2, inRange ? 6 : 0);
+    } else {
+      drawPlaceholderMarker(ctx, tx, ty, color, inRange);
+    }
     ctx.globalAlpha = 1;
+  });
 
+  if (targeting) {
     const [cx, cy] = cellCentre(state.cross.col, state.cross.row);
     drawGlow(ctx, c.panelSelected, 4, () => {
       ctx.strokeStyle = c.panelSelected;
@@ -259,6 +292,15 @@ function drawLocalMap(
   });
 
   drawText(ctx, "LOCAL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
+}
+
+/** Plain square for a building kind whose art is not designed yet. */
+function drawPlaceholderMarker(ctx: CanvasRenderingContext2D, cx: number, cy: number, color: string, glow: boolean): void {
+  drawGlow(ctx, color, glow ? 6 : 0, () => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.2;
+    ctx.strokeRect(cx - 3, cy - 3, 6, 6);
+  });
 }
 
 /**
@@ -397,13 +439,4 @@ function drawText(
   ctx.textBaseline = "middle";
   ctx.fillText(text, x, y);
   ctx.globalAlpha = 1;
-}
-
-/** Plain square for a building kind whose art is not designed yet. */
-function drawPlaceholderMarker(ctx: CanvasRenderingContext2D, cx: number, cy: number, color: string, glow: boolean): void {
-  drawGlow(ctx, color, glow ? 6 : 0, () => {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.2;
-    ctx.strokeRect(cx - 3, cy - 3, 6, 6);
-  });
 }
