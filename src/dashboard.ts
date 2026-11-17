@@ -49,6 +49,7 @@ export interface World {
   directionRadius: number; // a scan within this many cells gives a bearing
   suppressionSeconds: number; // how long a network's shields stay down once opened
   gridDisableCooldownSeconds: number; // time before grid disable can be used again
+  scanPulseSeconds: number; // how long a scan's ring takes to reach its full radius
 }
 
 export interface DashboardState {
@@ -72,6 +73,7 @@ export interface DashboardState {
   // A network is suppressed while its time is ahead of the clock.
   suppressedUntil: Record<number, number>;
   gridReadyAt: number; // dashboard time at which grid disable can be used again
+  pulseStarted: number | null; // dashboard time of the last scan, for the ring drawn on the mini map
 }
 
 export interface DashboardStep {
@@ -98,6 +100,7 @@ export function worldFor(cfg: Config): World {
       directionRadius: cfg.dashboard.directionRadius,
       suppressionSeconds: cfg.dashboard.suppressionSeconds,
       gridDisableCooldownSeconds: cfg.dashboard.gridDisableCooldownSeconds,
+      scanPulseSeconds: cfg.dashboard.scanPulseSeconds,
     };
   }
   return cachedWorld;
@@ -124,6 +127,7 @@ export function createDashboardState(cfg: Config): DashboardState {
     scan: null,
     suppressedUntil: {},
     gridReadyAt: 0,
+    pulseStarted: null,
   };
 }
 
@@ -250,7 +254,7 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
       return { ...s, mode: "moving", cross };
     }
-    if (verb === "scan") return { ...s, scan: scanFrom(s, world) };
+    if (verb === "scan") return { ...s, scan: scanFrom(s, world), pulseStarted: s.time };
     if (verb === "gridDisable" && gridDisableReady(s)) {
       // Takes down the shields of the network the robot is standing in, then starts the cooldown.
       const opened = openWindow(s, s.location, world);

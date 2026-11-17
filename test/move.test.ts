@@ -20,6 +20,7 @@ const flatWorld: World = {
   directionRadius: config.dashboard.directionRadius,
   suppressionSeconds: config.dashboard.suppressionSeconds,
   gridDisableCooldownSeconds: config.dashboard.gridDisableCooldownSeconds,
+  scanPulseSeconds: config.dashboard.scanPulseSeconds,
 };
 
 function step(state: DashboardState, actions: Action[], dt = DT, w: World = flatWorld): DashboardState {

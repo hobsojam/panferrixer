@@ -117,6 +117,7 @@ export const config = {
     // Placeholders, not from the original. The window is the author's guess: play-test it.
     suppressionSeconds: 45, // how long a network's shields stay down after a power station is hit or grid disable is used
     gridDisableCooldownSeconds: 60, // time before grid disable can be used again
+    scanPulseSeconds: 1.2, // how long a scan's ring takes to reach its full radius on the mini map
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
 
