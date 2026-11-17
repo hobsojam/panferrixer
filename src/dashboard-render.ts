@@ -45,7 +45,7 @@ export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardS
 function hintFor(state: DashboardState): string {
   if (state.mode === "targeting") return "ARROWS MOVE CROSS     SPACE FIRE     ESC CANCEL";
   if (state.mode === "moving") return "ARROWS MOVE POINT     SPACE WALK HERE     ESC CANCEL";
-  return "ARROWS SELECT     SPACE ACTIVATE";
+  return "ARROWS SELECT     SPACE ACTIVATE     M SOUND ON/OFF";
 }
 
 const PANEL_TOP = 70;

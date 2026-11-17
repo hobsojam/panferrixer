@@ -4,6 +4,7 @@ import type { Action } from "./dashboard";
 import { renderDashboard } from "./dashboard-render";
 import { InputController } from "./input";
 import { render } from "./render";
+import { SoundPlayer, eventsBetween } from "./sound";
 
 const canvas = document.getElementById("flight-canvas") as HTMLCanvasElement;
 canvas.width = config.canvas.width;
@@ -12,6 +13,7 @@ const ctx = canvas.getContext("2d");
 if (!ctx) throw new Error("2D canvas context unavailable");
 
 const input = new InputController();
+const sound = new SoundPlayer();
 
 function newSeed(): number {
   return Math.floor(Math.random() * 0xffffffff);
@@ -29,9 +31,12 @@ function frame(now: number): void {
   accumulator += (now - lastTime) / 1000;
   lastTime = now;
   pending.push(...input.consumeActions());
+  if (input.consumeMute()) sound.toggleMute();
 
   while (accumulator >= fixedDt) {
+    const before = state;
     state = updateApp(state, { actions: pending, steering: input.getSteering() }, fixedDt, config, newSeed);
+    for (const event of eventsBetween(before, state, config)) sound.play(event);
     pending = [];
     accumulator -= fixedDt;
   }
