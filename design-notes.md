@@ -363,16 +363,16 @@ Author's idea: the player has a defensive gun (working name: CIWS, as on ships);
 - **Slice 1: one hunter per network.**
   1. Hunter on the map: one per network, patrolling a beat between that network's buildings, shown on the mini map. It stays on its beat until alerted.
   2. Alert: a scan ring (section 4.2) that reaches the hunter alerts it, and it heads for the robot.
-  3. Engagement: when in range, it fires a few missiles and the missile-defence mini-game starts (section 4.8), about 10 seconds long.
-  4. Damage: each missile that gets through costs one shield plate. Shields are the robot's own, so grid disable does not affect them.
+  3. Engagement: when in range, it fires 3 volleys of 3 to 5 missiles (about 12 in total) over about 10 seconds, and the missile-defence mini-game starts (sections 4.8 and 4.9).
+  4. Damage: each missile that gets through is one hit. A shield plate absorbs 3 hits, and there are 8 plates (24 hits), as in section 4.9. Shields are the robot's own, so grid disable does not affect them.
   5. Kill: one missile hit destroys the hunter (section 4.10). It is not replaced in this slice.
 - **Slice 2:** the patroller, which runs for help when it confirms an intruder, and the defender, which stays in its dome until alerted.
 - **Slice 3:** the hauler, which flees and takes its cargo with it. Bosses come last.
   - Decided (author): no escort for the hauler for now. Revisit if playtesting shows haulers are easy prey.
   - Clarified: a destroyed hauler leaves its cargo to be picked up with the scanner (section 2.6), so killing it is a reward. Fleeing is what takes the cargo away (section 4.10).
 - **Decisions still open for slice 1** (placeholders until agreed):
-  - Damage per missed missile: proposed one shield plate.
-  - Missiles per hunter attack: proposed three over about 10 seconds.
+  - Hits per plate: 3 (section 4.9), or 2 for the tighter option in 4.9.
+  - Tuning target: section 4.9 says an average player loses about one plate per encounter. The table in 4.9 gives about two plates at half shot down, so this needs checking in playtesting.
   - Engagement and timers: the shield window keeps running during an engagement (decided).
 - **Controls:** keyboard only for the defence mini-game, as for the rest of the game. The mouse option in section 4.8 is not wanted for now.
 
