@@ -108,7 +108,7 @@ export const config = {
     tracePoints: 120,
     formName: "PROTOTYPE", // placeholder for the robot form shown in the name bar
     startNode: 0, // index into the network map where the robot begins
-    targetRange: 6, // in local-map cells, Chebyshev distance from the cross
+    targetRange: 2, // in map cells, Chebyshev distance from the cross: a target is only selected this close
     walkSpeed: 3, // cells per second the robot walks across its local patch
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
