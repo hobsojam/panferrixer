@@ -1,3 +1,4 @@
+import { reachableFrom } from "./route";
 import { createRng } from "./rng";
 
 /** 0 = valley, 1 = ground, 2 = high ground. */
@@ -35,7 +36,51 @@ export function generateLocalMap(node: number, cfg: LocalMapConfig): LocalMap {
   const tiers = heights.map((row) =>
     row.map((h): Tier => (h < cfg.valleyBelow ? 0 : h > cfg.highAbove ? 2 : 1))
   );
-  return { cols: cfg.cols, rows: cfg.rows, tiers };
+  const map: LocalMap = { cols: cfg.cols, rows: cfg.rows, tiers };
+
+  // The robot starts in the middle and must be able to walk out to either side.
+  const start = { x: Math.floor(cfg.cols / 2), y: Math.floor(cfg.rows / 2) };
+  tiers[start.y][start.x] = tiers[start.y][start.x] === 2 ? 1 : tiers[start.y][start.x];
+  openPassage(map, start, 0);
+  openPassage(map, start, cfg.cols - 1);
+  return map;
+}
+
+/**
+ * Turns the fewest high-ground cells needed into ground so that the start can reach
+ * the given edge column. Each step opens the high cell next to the reachable area
+ * that is nearest the edge, and nearest the start row when tied.
+ */
+function openPassage(map: LocalMap, start: { x: number; y: number }, edgeX: number): void {
+  for (;;) {
+    const reached = reachableFrom(start, map);
+    for (const key of reached) {
+      if (key % map.cols === edgeX) return;
+    }
+
+    let best: { x: number; y: number } | null = null;
+    let bestScore = Infinity;
+    for (const key of reached) {
+      const x = key % map.cols;
+      const y = Math.floor(key / map.cols);
+      for (const [nx, ny] of [
+        [x + 1, y],
+        [x - 1, y],
+        [x, y + 1],
+        [x, y - 1],
+      ]) {
+        if (nx < 0 || ny < 0 || nx >= map.cols || ny >= map.rows) continue;
+        if (map.tiers[ny][nx] !== 2) continue;
+        const score = Math.abs(nx - edgeX) * 1000 + Math.abs(ny - start.y);
+        if (score < bestScore) {
+          bestScore = score;
+          best = { x: nx, y: ny };
+        }
+      }
+    }
+    if (best === null) return;
+    map.tiers[best.y][best.x] = 1;
+  }
 }
 
 /** Averages each cell with its neighbours, clamping at the edges. */

@@ -3,6 +3,7 @@ import type { Config } from "./config";
 import { AVAILABLE_VERBS, VERB_GRID, isLow, selectedVerb, worldFor, type DashboardState, type NodeWorld, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
 import { drawGlow } from "./render";
+import { findRoute } from "./route";
 
 const VERB_LABELS: Record<Verb, string> = {
   move: "MOVE",
@@ -137,8 +138,8 @@ function drawSidePanel(ctx: CanvasRenderingContext2D, state: DashboardState, wor
   if (state.mode === "targeting") {
     drawTargetingReadout(ctx, state, world, cfg, x);
   } else if (state.mode === "moving") {
-    drawMovingReadout(ctx, cfg, x);
-  } else if (state.walk) {
+    drawMovingReadout(ctx, state, world, cfg, x);
+  } else if (state.route.length > 0) {
     drawWalkingReadout(ctx, state, cfg, x);
   } else {
     drawSelectedReadout(ctx, state, cfg, x);
@@ -168,20 +169,23 @@ function drawSelectedReadout(ctx: CanvasRenderingContext2D, state: DashboardStat
   }
 }
 
-function drawMovingReadout(ctx: CanvasRenderingContext2D, cfg: Config, x: number): void {
+function drawMovingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, world: NodeWorld, cfg: Config, x: number): void {
   const c = cfg.colors;
+  const reachable = findRoute(state.pos, { x: state.cross.col, y: state.cross.row }, world.map) !== null;
   drawText(ctx, "WALK TO", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
-  drawText(ctx, "CHOOSE A POINT", x + 14, PANEL_TOP + 180, 16, c.panelSelected, 1, "monospace", "left");
-  drawText(ctx, "SPACE TO WALK THERE", x + 14, PANEL_TOP + 204, 12, c.energy, 1, "monospace", "left");
+  if (reachable) {
+    drawText(ctx, "CHOOSE A POINT", x + 14, PANEL_TOP + 180, 16, c.panelSelected, 1, "monospace", "left");
+    drawText(ctx, "SPACE TO WALK THERE", x + 14, PANEL_TOP + 204, 12, c.energy, 1, "monospace", "left");
+  } else {
+    drawText(ctx, "NO ROUTE THERE", x + 14, PANEL_TOP + 180, 16, c.panelDim, 1, "monospace", "left");
+    drawText(ctx, "HIGH GROUND BLOCKS THE WAY", x + 14, PANEL_TOP + 204, 11, c.text, 0.7, "monospace", "left");
+  }
 }
 
 function drawWalkingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, x: number): void {
   const c = cfg.colors;
-  const walk = state.walk;
-  if (!walk) return;
-  const distance = Math.hypot(walk.x - state.pos.x, walk.y - state.pos.y);
   drawText(ctx, "WALKING", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
-  drawText(ctx, `${distance.toFixed(1)} CELLS TO GO`, x + 14, PANEL_TOP + 180, 16, c.panelSelected, 1, "monospace", "left");
+  drawText(ctx, `${state.route.length} CELLS TO GO`, x + 14, PANEL_TOP + 180, 16, c.panelSelected, 1, "monospace", "left");
   drawText(ctx, "CHOOSE ANOTHER POINT TO REDIRECT", x + 14, PANEL_TOP + 204, 11, c.text, 0.7, "monospace", "left");
 }
 
@@ -261,10 +265,20 @@ function drawLocalMap(
     drawCross(ctx, cx, cy, c.panelSelected);
   }
 
-  if (state.walk) {
-    const [wx, wy] = cellCentre(state.walk.x, state.walk.y);
-    drawGlow(ctx, c.panelDim, 0, () => {
-      ctx.strokeStyle = c.panelDim;
+  if (state.route.length > 0) {
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = c.panelSelected;
+    for (const cell of state.route) {
+      const [rx, ry] = cellCentre(cell.x, cell.y);
+      ctx.beginPath();
+      ctx.arc(rx, ry, 1.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    const destination = state.route[state.route.length - 1];
+    const [wx, wy] = cellCentre(destination.x, destination.y);
+    drawGlow(ctx, c.panelSelected, 0, () => {
+      ctx.strokeStyle = c.panelSelected;
       ctx.lineWidth = 1;
       ctx.strokeRect(wx - 3, wy - 3, 6, 6);
     });

@@ -1,5 +1,6 @@
 import type { Config } from "./config";
 import { generateLocalMap, targetsFor, type LocalMap, type Target } from "./local-map";
+import { findRoute } from "./route";
 
 /** The four verbs from design-notes 4.6. Missile and Move work; scan and grid disable do not yet. */
 export type Verb = "move" | "scan" | "missile" | "gridDisable";
@@ -44,7 +45,7 @@ export interface DashboardState {
   cross: Cross; // the pointer used while targeting or choosing a walk point
   target: number | null; // index into the node's targets, when one is in range
   pos: Point; // where the robot is in the local patch
-  walk: Point | null; // where the robot is walking to, if it is walking
+  route: Point[]; // cells still to walk through, in order; empty when standing still
 }
 
 export interface DashboardStep {
@@ -84,7 +85,7 @@ export function createDashboardState(cfg: Config): DashboardState {
     cross: { col: centreCol, row: centreRow },
     target: null,
     pos: { x: centreCol, y: centreRow },
-    walk: null,
+    route: [],
   };
 }
 
@@ -117,15 +118,27 @@ export function stepDashboard(state: DashboardState, actions: readonly Action[],
   return { state: s, fire };
 }
 
-/** Moves the robot toward its walk point at the walk speed, and stops it on arrival. */
+/** Walks the robot along its route at the walk speed, cell by cell, and stops it at the end. */
 function walkStep(s: DashboardState, dt: number, speed: number): DashboardState {
-  if (!s.walk) return s;
-  const dx = s.walk.x - s.pos.x;
-  const dy = s.walk.y - s.pos.y;
-  const distance = Math.hypot(dx, dy);
-  const step = speed * dt;
-  if (distance <= step) return { ...s, pos: { ...s.walk }, walk: null };
-  return { ...s, pos: { x: s.pos.x + (dx / distance) * step, y: s.pos.y + (dy / distance) * step } };
+  if (s.route.length === 0) return s;
+  let pos = { ...s.pos };
+  let route = s.route;
+  let budget = speed * dt;
+  while (budget > 0 && route.length > 0) {
+    const next = route[0];
+    const dx = next.x - pos.x;
+    const dy = next.y - pos.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance <= budget) {
+      pos = { ...next };
+      route = route.slice(1);
+      budget -= distance;
+    } else {
+      pos = { x: pos.x + (dx / distance) * budget, y: pos.y + (dy / distance) * budget };
+      budget = 0;
+    }
+  }
+  return { ...s, pos, route };
 }
 
 function browseAction(s: DashboardState, action: Action, world: NodeWorld): DashboardState {
@@ -150,7 +163,10 @@ function browseAction(s: DashboardState, action: Action, world: NodeWorld): Dash
 function movingAction(s: DashboardState, action: Action, world: NodeWorld): DashboardState {
   if (action === "cancel") return { ...s, mode: "browse" };
   if (action === "activate") {
-    return { ...s, mode: "browse", walk: { x: s.cross.col, y: s.cross.row } };
+    // High ground, or ground that cannot be reached, is refused: the chooser stays open.
+    const route = findRoute(s.pos, { x: s.cross.col, y: s.cross.row }, world.map);
+    if (route === null) return s;
+    return { ...s, mode: "browse", route };
   }
   return { ...s, cross: shiftCross(s.cross, action, world) };
 }
