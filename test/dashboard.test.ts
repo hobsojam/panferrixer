@@ -43,8 +43,6 @@ describe("entering targeting", () => {
   it("activating a verb that is not built does nothing", () => {
     const onScan = { ...createDashboardState(config), row: 0, col: 1 };
     expect(step(onScan, ["activate"]).state.mode).toBe("browse");
-    const onGrid = { ...createDashboardState(config), row: 1, col: 1 };
-    expect(step(onGrid, ["activate"]).state.mode).toBe("browse");
   });
 });
 

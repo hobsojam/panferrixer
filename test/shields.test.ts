@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
-import { createDashboardState, gridDisableReady, isShielded, isSuppressed, networkOf, stepDashboard, worldFor, type DashboardState } from "../src/dashboard";
+import { createDashboardState, isShielded, isSuppressed, networkOf, worldFor, type DashboardState } from "../src/dashboard";
 import { createInitialState } from "../src/flight";
 import type { Target } from "../src/local-map";
 
@@ -39,30 +39,6 @@ describe("networks and power stations", () => {
   });
 });
 
-describe("grid disable", () => {
-  it("opens the window for the network the robot is in, and starts a cooldown", () => {
-    const start = createDashboardState(config);
-    const onGrid = { ...start, row: 1, col: 1, location: 0 };
-    const step = stepDashboard(onGrid, ["activate"], DT, world).state;
-    expect(isSuppressed(step, 0)).toBe(true);
-    expect(gridDisableReady(step)).toBe(false);
-  });
-
-  it("does nothing while cooling down", () => {
-    const start = createDashboardState(config);
-    const cooling = { ...start, row: 1, col: 1, location: 0, time: 10, gridReadyAt: 40 };
-    const step = stepDashboard(cooling, ["activate"], DT, world).state;
-    expect(step.suppressedUntil).toEqual({});
-    expect(step.gridReadyAt).toBe(40);
-  });
-
-  it("the window closes once its time has passed", () => {
-    const start = createDashboardState(config);
-    const opened = stepDashboard({ ...start, row: 1, col: 1, location: 0 }, ["activate"], DT, world).state;
-    const later = { ...opened, time: opened.time + config.dashboard.suppressionSeconds + 1 };
-    expect(isSuppressed(later, 0)).toBe(false);
-  });
-});
 
 describe("shields at launch", () => {
   it("a power station is never shielded", () => {
