@@ -33,7 +33,7 @@ export interface Town {
 }
 
 /** Placeholder target kinds: the comms centre replaces the original beacon (design-notes 4.4). Art is not designed yet. */
-export type TargetKind = "power" | "mine" | "commsCentre" | "dome";
+export type TargetKind = "power" | "hunter" | "mine" | "commsCentre" | "dome";
 
 export interface Target {
   col: number;
@@ -191,8 +191,9 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
       if (map.tiers[row][col] === 0) continue;
       if (targets.some((t) => t.col === col && t.row === row)) continue;
       // Each network has one power station, placed first. It is never a drop: it cannot be destroyed.
-      const kind = placed === 0 ? "power" : TARGET_KINDS[Math.floor(rng() * TARGET_KINDS.length)];
-      const hasDrop = rng() < cfg.dropChance && kind !== "power";
+      // The hunter, placed second, is the network's one enemy. It has no drop.
+      const kind = placed === 0 ? "power" : placed === 1 ? "hunter" : TARGET_KINDS[Math.floor(rng() * TARGET_KINDS.length)];
+      const hasDrop = rng() < cfg.dropChance && kind !== "power" && kind !== "hunter";
       targets.push({ col, row, kind, hasDrop, network });
       placed += 1;
     }

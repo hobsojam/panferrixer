@@ -89,6 +89,20 @@ export const config = {
     maxGenerationAttempts: 50,
   },
 
+  // Missile defence (design-notes 2.9a, 4.8, 4.9). Placeholders, tuned by playtest.
+  defence: {
+    warningSeconds: 1.5, // a short warning before the first volley
+    volleyMin: 3, // missiles per volley, from design-notes 4.9
+    volleyMax: 5,
+    volleys: 3,
+    volleyGapSeconds: 2.8, // time between volley starts
+    missileSpacingSeconds: 0.15, // between missiles in one volley
+    missileTravelSeconds: 2.2, // from launch to arrival
+    laneMax: 0.9, // lateral spread of the incoming missiles, as a fraction of the robot's range
+    tracerToleranceLateral: 0.1, // how close the robot must be to a missile lane for a tracer to hit it
+    tracerCooldownSeconds: 0.25,
+  },
+
   terminalPhase: {
     startFraction: 0.85, // fraction of totalDistance where mountains stop and the target appears
     targetHalfWidth: 0.18, // lateral tolerance counted as a hit
@@ -118,6 +132,8 @@ export const config = {
     suppressionSeconds: 45, // how long a network's shields stay down after a power station is hit or grid disable is used
     gridDisableCooldownSeconds: 60, // time before grid disable can be used again
     scanPulseSeconds: 1.2, // how long a scan's ring takes to reach its full radius on the mini map
+    hitsPerPlate: 3, // design-notes 4.9: each shield plate absorbs three missile hits
+    hunterEngageRange: 6, // in map cells: an alerted hunter opens fire when the robot is this close
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
 

@@ -14,6 +14,7 @@ const VERB_LABELS: Record<Verb, string> = {
 
 const TARGET_LABELS: Record<Target["kind"], string> = {
   power: "POWER",
+  hunter: "HUNTER",
   mine: "MINE",
   commsCentre: "COMMS CENTRE",
   dome: "DOME",
@@ -311,7 +312,7 @@ function drawLocalMap(
     const iconWidth = cfg.dashboard.targetIconWidth;
     ctx.globalAlpha = targeting && !inRange ? 0.6 : 1;
     if (hasArt(t.kind)) {
-      strokeArt(ctx, BUILDING_ART[t.kind].simple, tx, ty + iconWidth / 4, iconWidth / 2, color, 1.2, inRange ? 6 : 0);
+      strokeArt(ctx, BUILDING_ART[t.kind]!.simple, tx, ty + iconWidth / 4, iconWidth / 2, color, 1.2, inRange ? 6 : 0);
     } else {
       drawPlaceholderMarker(ctx, tx, ty, color, inRange);
     }
