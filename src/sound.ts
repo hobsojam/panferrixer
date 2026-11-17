@@ -84,6 +84,10 @@ export class SoundPlayer {
     return this.muted;
   }
 
+  isMuted(): boolean {
+    return this.muted;
+  }
+
   play(event: SoundEvent): void {
     if (this.muted) return;
     const ctx = this.audio();

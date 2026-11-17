@@ -20,7 +20,7 @@ const TARGET_LABELS: Record<Target["kind"], string> = {
 };
 
 /** Pure drawing: reads state and config, never mutates either. */
-export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config): void {
+export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, soundOn: boolean = true): void {
   const { width: w, height: h } = cfg.canvas;
   const c = cfg.colors;
   const world = worldFor(cfg);
@@ -35,17 +35,17 @@ export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardS
   drawGauge(ctx, "ENERGY", state.energyCells, cfg.dashboard.energyCells, 330, cfg, "cell", state.time);
   drawGauge(ctx, "SHIELDS", state.shieldPlates, cfg.dashboard.shieldPlates, 384, cfg, "plate", state.time);
 
-  drawText(ctx, hintFor(state), w / 2, h - 28, 14, c.text, 0.8, "monospace");
+  drawText(ctx, hintFor(state, soundOn), w / 2, h - 28, 14, c.text, 0.8, "monospace");
 
   ctx.strokeStyle = c.frame;
   ctx.lineWidth = 4;
   ctx.strokeRect(2, 2, w - 4, h - 4);
 }
 
-function hintFor(state: DashboardState): string {
+function hintFor(state: DashboardState, soundOn: boolean): string {
   if (state.mode === "targeting") return "ARROWS MOVE CROSS     SPACE FIRE     ESC CANCEL";
   if (state.mode === "moving") return "ARROWS MOVE POINT     SPACE WALK HERE     ESC CANCEL";
-  return "ARROWS SELECT     SPACE ACTIVATE     M SOUND ON/OFF";
+  return `ARROWS SELECT     SPACE ACTIVATE     M SOUND ${soundOn ? "ON" : "OFF"}`;
 }
 
 const PANEL_TOP = 70;
