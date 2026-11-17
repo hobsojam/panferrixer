@@ -43,7 +43,9 @@ export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardS
 }
 
 function hintFor(state: DashboardState, soundOn: boolean): string {
-  if (state.mode === "targeting") return "ARROWS MOVE CROSS     SPACE FIRE     ESC CANCEL";
+  if (state.mode === "targeting") {
+    return state.purpose === "gridDisable" ? "ARROWS MOVE CROSS     SPACE CUT POWER     ESC CANCEL" : "ARROWS MOVE CROSS     SPACE FIRE     ESC CANCEL";
+  }
   if (state.mode === "moving") return "ARROWS MOVE POINT     SPACE WALK HERE     ESC CANCEL";
   return `ARROWS SELECT     SPACE ACTIVATE     M SOUND ${soundOn ? "ON" : "OFF"}`;
 }
@@ -199,7 +201,7 @@ function drawGridReadout(ctx: CanvasRenderingContext2D, state: DashboardState, c
     const down = Math.ceil((state.suppressedUntil[state.location] ?? 0) - state.time);
     drawText(ctx, `NETWORK POWER DOWN ${down}`, x + 14, PANEL_TOP + 222, 12, c.shield, 1, "monospace", "left");
   } else if (ready) {
-    drawText(ctx, "SPACE TO CUT POWER HERE", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
+    drawText(ctx, "SPACE TO CHOOSE A POWER STATION", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
   }
 }
 
@@ -231,9 +233,9 @@ function drawTargetingReadout(ctx: CanvasRenderingContext2D, state: DashboardSta
   if (target) {
     drawText(ctx, TARGET_LABELS[target.kind], x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
     drawText(ctx, "IN RANGE", x + 14, PANEL_TOP + 204, 13, c.energy, 1, "monospace", "left");
-    drawText(ctx, "SPACE TO FIRE", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
+    drawText(ctx, state.purpose === "gridDisable" ? "SPACE TO CUT POWER" : "SPACE TO FIRE", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
   } else {
-    drawText(ctx, "NO TARGET IN RANGE", x + 14, PANEL_TOP + 180, 13, c.panelDim, 1, "monospace", "left");
+    drawText(ctx, state.purpose === "gridDisable" ? "NO POWER STATION IN RANGE" : "NO TARGET IN RANGE", x + 14, PANEL_TOP + 180, 13, c.panelDim, 1, "monospace", "left");
     drawText(ctx, "MOVE THE CROSS", x + 14, PANEL_TOP + 204, 12, c.text, 0.7, "monospace", "left");
   }
 }

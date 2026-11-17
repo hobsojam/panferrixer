@@ -74,6 +74,8 @@ export interface DashboardState {
   suppressedUntil: Record<number, number>;
   gridReadyAt: number; // dashboard time at which grid disable can be used again
   pulseStarted: number | null; // dashboard time of the last scan, for the ring drawn on the mini map
+  // What the cross is choosing for: a missile target (any building), or a power station to cut.
+  purpose: "missile" | "gridDisable";
 }
 
 export interface DashboardStep {
@@ -128,6 +130,7 @@ export function createDashboardState(cfg: Config): DashboardState {
     suppressedUntil: {},
     gridReadyAt: 0,
     pulseStarted: null,
+    purpose: "missile",
   };
 }
 
@@ -190,7 +193,14 @@ export function stepDashboard(state: DashboardState, actions: readonly Action[],
     } else if (action === "cancel") {
       s = { ...s, mode: "browse", target: null };
     } else if (action === "activate") {
-      if (s.target !== null) fire = world.targets[s.target];
+      if (s.target !== null && s.purpose === "gridDisable") {
+        // Cutting power at a station takes down its network's shields, then starts the cooldown.
+        const station = world.targets[s.target];
+        const opened = openWindow(s, networkOf(station), world);
+        s = { ...opened, mode: "browse", target: null, gridReadyAt: s.time + world.gridDisableCooldownSeconds };
+      } else if (s.target !== null) {
+        fire = world.targets[s.target];
+      }
     } else {
       s = moveCross(s, action, world);
     }
@@ -248,7 +258,7 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
     const verb = selectedVerb(s);
     if (verb === "missile") {
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
-      return { ...s, mode: "targeting", cross, target: nearestTarget(cross, world) };
+      return { ...s, mode: "targeting", purpose: "missile", cross, target: nearestTarget(cross, world, anyTarget) };
     }
     if (verb === "move") {
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
@@ -256,9 +266,9 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
     }
     if (verb === "scan") return { ...s, scan: scanFrom(s, world), pulseStarted: s.time };
     if (verb === "gridDisable" && gridDisableReady(s)) {
-      // Takes down the shields of the network the robot is standing in, then starts the cooldown.
-      const opened = openWindow(s, s.location, world);
-      return { ...opened, gridReadyAt: s.time + world.gridDisableCooldownSeconds };
+      // Choose a power station with the cross, the same way as a missile target.
+      const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
+      return { ...s, mode: "targeting", purpose: "gridDisable", cross, target: nearestTarget(cross, world, isPowerStation) };
     }
   }
   return s;
@@ -328,14 +338,24 @@ function shiftCross(cross: Cross, action: Action, world: World): Cross {
 
 function moveCross(s: DashboardState, action: Action, world: World): DashboardState {
   const cross = shiftCross(s.cross, action, world);
-  return { ...s, cross, target: nearestTarget(cross, world) };
+  const filter = s.purpose === "gridDisable" ? isPowerStation : anyTarget;
+  return { ...s, cross, target: nearestTarget(cross, world, filter) };
 }
 
-/** The target closest to the cross within range; ties go to the earlier target. */
-export function nearestTarget(cross: Cross, world: World): number | null {
+function anyTarget(): boolean {
+  return true;
+}
+
+function isPowerStation(t: Target): boolean {
+  return t.kind === "power";
+}
+
+/** The target closest to the cross within range that passes the filter; ties go to the earlier target. */
+export function nearestTarget(cross: Cross, world: World, accept: (t: Target) => boolean = anyTarget): number | null {
   let best: number | null = null;
   let bestDistance = Infinity;
   world.targets.forEach((t, index) => {
+    if (!accept(t)) return;
     const distance = Math.max(Math.abs(t.col - cross.col), Math.abs(t.row - cross.row));
     if (distance <= world.range && distance < bestDistance) {
       best = index;
