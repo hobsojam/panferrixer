@@ -261,6 +261,14 @@ The original already has four types (dome, power plant, mine, beacon), each with
 - Winnable progression: dependency-aware placement, so each key upgrade is somewhere reachable given what the player already has.
 - Minor drops come from enemies and so spread out on their own.
 - Later decision: fixed map per playthrough or seeded generation so layouts can be replayed and shared.
+- **Buildings and passability (decided, author).** There is no mechanic for entering buildings and none is planned. In the first builds a building filled one cell but did not block movement, so the robot could walk through a dome.
+  - **Player:** intact buildings are impassable. A ruin (a building destroyed by a missile) becomes passable rubble, since any drop lies there. The power station cannot be destroyed, so it always blocks.
+  - **Enemies:** can pass through buildings but never stop on a building cell. The fiction supports this: these are the enemy's own buildings (domes build and garrison robots, haulers deliver to mines and power stations), so enemies have a way in and the intruder does not. It also removes "stuck" cases: a robot built inside a dome always has a way out, and building placement cannot break an enemy route. Patrol posts, chase destinations and return points are always open ground, so an enemy the player can see is always one the player can target. Defenders on standby are literally inside their dome until alerted.
+  - Readability: an enemy crossing a building should look intentional, for example a short fade or a dimmed map icon while inside.
+  - If enemies cutting through buildings during a chase feels unfair in playtesting, give building cells an extra route cost for enemies so they prefer open ground. That is a tuning value, not a redesign.
+  - **Passability depends on game state**, not only the terrain: the check takes the list of ruins as well as the map. The same check serves the robot's movement, the reachability preview on the map, and enemy routes (with the enemy exception above).
+  - **Clicking a building** moves the robot to the nearest free cell beside it, instead of treating it as unreachable.
+  - **Generation guarantee:** building placement must never cut the player's routes. Reject any placement that cuts a town off from the others, or leaves a building with no free neighbouring cell. Extend the existing "every town is reachable" test to cover this. Enemies need no such check.
 
 ### 4.8 Missile defence
 - Symmetry: offence is steering a missile through obstacles, defence is shooting missiles at the player. Keep that contrast; both are short, abstract and readable at a glance.
