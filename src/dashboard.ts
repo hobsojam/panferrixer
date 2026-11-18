@@ -57,6 +57,8 @@ export interface World {
   hunterCooldownRandomSeconds: number; // plus up to this much more
   hunterFirstAttackDelayMin: number; // the wait before a newly alerted hunter's first attack
   hunterFirstAttackDelayMax: number;
+  hunterSightCells: number; // a hunter this close to the robot sees it (design-notes 4.10)
+  hunterInvestigateSeconds: number; // how long a hunter searches where it was sent
 }
 
 export interface DashboardState {
@@ -89,8 +91,18 @@ export interface DashboardState {
   hunterPos: Record<number, Point>;
   // Dashboard time at which each hunter can attack again.
   hunterReadyAt: Record<number, number>;
+  // Hunters sent to look at a place, such as a cut power station: where, and when the search
+  // ends (null until it arrives). Missing means it is not investigating.
+  investigating: Record<number, Investigation>;
   // Hits taken on the top shield plate so far. A plate goes when it reaches hitsPerPlate.
   shieldHits: number;
+}
+
+/** A hunter sent to look at a place: it walks there, searches for a while, then goes home. */
+export interface Investigation {
+  x: number;
+  y: number;
+  until: number | null;
 }
 
 export interface DashboardStep {
@@ -124,13 +136,15 @@ export function worldFor(cfg: Config): World {
       hunterCooldownRandomSeconds: cfg.dashboard.hunterCooldownRandomSeconds,
       hunterFirstAttackDelayMin: cfg.dashboard.hunterFirstAttackDelayMin,
       hunterFirstAttackDelayMax: cfg.dashboard.hunterFirstAttackDelayMax,
+      hunterSightCells: cfg.dashboard.hunterSightCells,
+      hunterInvestigateSeconds: cfg.dashboard.hunterInvestigateSeconds,
     };
   }
   return cachedWorld;
 }
 
 export function createDashboardState(cfg: Config): DashboardState {
-  const start = townCentres(cfg.localMap)[cfg.dashboard.startNode];
+  const start = startPosition(worldFor(cfg), cfg);
   return {
     row: 0,
     col: 0,
@@ -155,8 +169,45 @@ export function createDashboardState(cfg: Config): DashboardState {
     alerted: [],
     hunterPos: {},
     hunterReadyAt: {},
+    investigating: {},
     shieldHits: 0,
   };
+}
+
+/**
+ * Where the robot starts (design-notes 4.7): on open ground outside every town and out of
+ * sight of every hunter, as near the starting network as that allows, so the player
+ * decides when and how to walk in. Searched outward from the starting town by walking
+ * distance, so the start is always reachable. Falls back to the town centre.
+ */
+export function startPosition(world: World, cfg: Config): Point {
+  const home = townCentres(cfg.localMap)[cfg.dashboard.startNode];
+  const clearance = cfg.dashboard.startClearanceCells;
+  const blocked = new Set<number>();
+  const posts: Point[] = [];
+  for (const t of world.targets) {
+    if (t.kind === "hunter") posts.push({ x: t.col, y: t.row });
+    else blocked.add(cellKey(world.map, t.col, t.row));
+  }
+  const outsideTowns = (x: number, y: number) =>
+    !world.towns.some((t) => inTown(t, world.townRadiusCols + clearance, world.townRadiusRows + clearance, x, y));
+  const unseen = (x: number, y: number) => posts.every((p) => Math.hypot(p.x - x, p.y - y) > world.hunterSightCells + clearance);
+
+  const seen = new Set<number>([cellKey(world.map, home.x, home.y)]);
+  const queue: Point[] = [{ x: home.x, y: home.y }];
+  for (let head = 0; head < queue.length; head++) {
+    const c = queue[head];
+    if (outsideTowns(c.x, c.y) && unseen(c.x, c.y)) return c;
+    for (const [dx, dy] of OFFSETS) {
+      const nx = c.x + dx;
+      const ny = c.y + dy;
+      const k = cellKey(world.map, nx, ny);
+      if (seen.has(k) || !isPassable(world.map, nx, ny, blocked)) continue;
+      seen.add(k);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+  return { x: home.x, y: home.y };
 }
 
 /** The network a target belongs to: the town it was placed in. */
@@ -263,9 +314,23 @@ export function walkPoint(pos: Point, route: readonly Point[], distance: number)
 }
 
 /**
- * Moves the hunters. An alerted hunter walks toward the robot, and breaks off once the
- * robot is beyond its leash. A hunter that is not alerted walks back to its post.
- * A destroyed hunter does not move.
+ * Hunters that have just noticed the robot become alerted: each waits a moment before its
+ * first attack, and drops any search it was on.
+ */
+export function alertTo(s: DashboardState, indices: readonly number[], world: World): DashboardState {
+  const fresh = indices.filter((i) => !s.alerted.includes(i));
+  if (fresh.length === 0) return s;
+  const investigating = { ...s.investigating };
+  for (const i of fresh) delete investigating[i];
+  return { ...s, alerted: [...s.alerted, ...fresh], hunterReadyAt: delayFirstAttacks(s, fresh, world), investigating };
+}
+
+/**
+ * Moves the hunters (design-notes 4.10). Every hunter is always looking: one that comes
+ * within sight of the robot is alerted, whatever it was doing. An alerted hunter walks
+ * toward the robot, and breaks off once the robot is beyond its leash. A hunter sent to
+ * investigate walks there, searches for a while, then goes home. Otherwise it walks back
+ * to its post. A destroyed hunter does not move.
  */
 export function moveHunters(s: DashboardState, world: World, dt: number): DashboardState {
   let next = s;
@@ -273,14 +338,36 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
     if (t.kind !== "hunter" || next.ruins.includes(index)) return;
     const post = { x: t.col, y: t.row };
     const here = positionOf(next, index, world);
+    if (distanceTo(next.pos, here.x, here.y) <= world.hunterSightCells) next = alertTo(next, [index], world);
     if (next.alerted.includes(index) && Math.hypot(here.x - post.x, here.y - post.y) > world.hunterLeashCells) {
       next = { ...next, alerted: next.alerted.filter((i) => i !== index) };
     }
     const alerted = next.alerted.includes(index);
-    if (!alerted && here.x === post.x && here.y === post.y) return;
-    const goal = alerted ? { x: Math.round(next.pos.x), y: Math.round(next.pos.y) } : post;
-    // Enemies may pass through buildings but never stop on one (design-notes 4.7). Both goals
-    // are open ground: the robot cannot stand on a building, and a post is never one.
+    const search = alerted ? undefined : next.investigating[index];
+
+    let goal: Point;
+    if (alerted) {
+      goal = { x: Math.round(next.pos.x), y: Math.round(next.pos.y) };
+    } else if (search) {
+      if (here.x === search.x && here.y === search.y) {
+        // Arrived: search for a while, then give up and go home.
+        if (search.until === null) {
+          next = { ...next, investigating: { ...next.investigating, [index]: { ...search, until: next.time + world.hunterInvestigateSeconds } } };
+        } else if (next.time >= search.until) {
+          const investigating = { ...next.investigating };
+          delete investigating[index];
+          next = { ...next, investigating };
+        }
+        return;
+      }
+      goal = { x: search.x, y: search.y };
+    } else {
+      if (here.x === post.x && here.y === post.y) return;
+      goal = post;
+    }
+    // Enemies may pass through buildings but never stop on one (design-notes 4.7). Every goal
+    // is open ground: the robot cannot stand on a building, a post is never one, and a
+    // search point is a free cell beside a building.
     const route = findRoute({ x: Math.round(here.x), y: Math.round(here.y) }, goal, world.map);
     if (route === null) return;
     const walked = walkPoint(here, route, world.hunterSpeed * dt);
@@ -289,6 +376,23 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
     next = { ...next, hunterPos: { ...next.hunterPos, [index]: pos } };
   });
   return next;
+}
+
+/**
+ * Cutting a power station is noticed at the station, not at the robot (design-notes 4.3):
+ * the network's hunter is sent to look, at the free cell beside the station nearest to it.
+ * A hunter already chasing the robot ignores the outage.
+ */
+export function investigateOutage(s: DashboardState, station: Target, world: World): DashboardState {
+  const index = world.targets.findIndex((t) => t.kind === "hunter" && t.network === station.network);
+  if (index === -1 || s.ruins.includes(index) || s.alerted.includes(index)) return s;
+  const blocked = buildingCells(s, world);
+  const here = positionOf(s, index, world);
+  const beside = OFFSETS.map(([dx, dy]) => ({ x: station.col + dx, y: station.row + dy }))
+    .filter((c) => isPassable(world.map, c.x, c.y, blocked))
+    .sort((a, b) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(b.x - here.x, b.y - here.y));
+  if (beside.length === 0) return s;
+  return { ...s, investigating: { ...s.investigating, [index]: { ...beside[0], until: null } } };
 }
 
 /** A scan's ring alerts every living hunter it reaches. Alerted hunters stay alerted until they engage. */
@@ -382,8 +486,9 @@ export function stepDashboard(state: DashboardState, actions: readonly Action[],
     } else if (action === "activate") {
       if (s.target !== null && s.purpose === "gridDisable") {
         // Cutting power at a station takes down its network's shields, then starts the cooldown.
+        // The network notices: its hunter is sent to look at the station.
         const station = world.targets[s.target];
-        const opened = openWindow(s, networkOf(station), world);
+        const opened = investigateOutage(openWindow(s, networkOf(station), world), station, world);
         s = { ...opened, mode: "browse", target: null, gridReadyAt: s.time + world.gridDisableCooldownSeconds };
       } else if (s.target !== null) {
         fire = world.targets[s.target];
@@ -436,8 +541,7 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
       return { ...s, mode: "moving", cross };
     }
     if (verb === "scan") {
-      const alerted = alertHunters(s, world);
-      return { ...s, scan: scanFrom(s, world), pulseStarted: s.time, alerted, hunterReadyAt: delayFirstAttacks(s, alerted, world) };
+      return { ...alertTo(s, alertHunters(s, world), world), scan: scanFrom(s, world), pulseStarted: s.time };
     }
     if (verb === "gridDisable" && gridDisableReady(s)) {
       // Choose a power station with the cross, the same way as a missile target.

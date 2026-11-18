@@ -27,6 +27,8 @@ const flatWorld: World = {
   hunterCooldownRandomSeconds: config.dashboard.hunterCooldownRandomSeconds,
   hunterFirstAttackDelayMin: config.dashboard.hunterFirstAttackDelayMin,
   hunterFirstAttackDelayMax: config.dashboard.hunterFirstAttackDelayMax,
+  hunterSightCells: config.dashboard.hunterSightCells,
+  hunterInvestigateSeconds: config.dashboard.hunterInvestigateSeconds,
 };
 
 function step(state: DashboardState, actions: Action[], dt = DT, w: World = flatWorld): DashboardState {

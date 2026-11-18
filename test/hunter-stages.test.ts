@@ -38,7 +38,8 @@ describe("hunter stages", () => {
   });
 
   it("a hunter that is no longer alerted walks back to its post", () => {
-    const moved = { ...createDashboardState(config), pos: robotAway(10), hunterPos: { [hunterIndex]: { x: post.x + 8, y: post.y } } };
+    // The robot is well out of sight on the far side, so the hunter is not drawn to it on the way.
+    const moved = { ...createDashboardState(config), pos: robotAway(-20), hunterPos: { [hunterIndex]: { x: post.x + 8, y: post.y } } };
     const later = run(moved, 10);
     expect(positionOf(later, hunterIndex, world)).toEqual(post);
   });

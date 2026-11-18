@@ -161,6 +161,10 @@ export const config = {
     hunterCooldownRandomSeconds: 6, // plus up to this much more, so attacks are not a metronome
     hunterFirstAttackDelayMin: 1, // after an alert, a hunter waits this long before its first attack
     hunterFirstAttackDelayMax: 3,
+    // Hunters are always looking (design-notes 4.10): coming this close to one alerts it.
+    hunterSightCells: 5, // just inside the engagement range, and well inside what the player can see
+    hunterInvestigateSeconds: 10, // how long a hunter searches a cut power station before going home
+    startClearanceCells: 2, // the robot starts at least this far outside a town and beyond any hunter's sight
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
 
