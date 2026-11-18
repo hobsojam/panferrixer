@@ -144,8 +144,8 @@ describe("an alerted hunter holds at its preferred range", () => {
 });
 
 describe("a scan wakes hunters by chance, falling with range", () => {
-  const close = config.dashboard.blipRadius;
-  const edge = config.dashboard.directionRadius;
+  const close = config.dashboard.closeRadius;
+  const edge = config.dashboard.scanRadius;
 
   it("certain within the close zone, nothing beyond the ring, falling steadily between", () => {
     expect(scanWakeChance(0, world)).toBe(1);

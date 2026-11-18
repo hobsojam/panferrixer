@@ -50,10 +50,11 @@ describe("dashboard sounds", () => {
     const withDrop = { ...near, scan: null };
     const world2 = { ...world, targets: [{ col: 5, row: 7, kind: "dome" as const, hasDrop: true, network: 0 }] };
     const after = stepDashboard({ ...withDrop, ruins: [0] }, ["activate"], DT, { ...world2, range: 2 });
-    expect(after.state.scan).toEqual({ kind: "signal", bearing: "S", close: true });
+    expect(after.state.scan).toEqual({ origin: { x: 5, y: 5 }, blips: [0], close: true });
+    const origin = { x: 5, y: 5 };
     expect(eventsBetween(dash(withDrop), dash({ ...withDrop, scan: after.state.scan }), config)).toEqual(["scanNear"]);
-    expect(eventsBetween(dash(withDrop), dash({ ...withDrop, scan: { kind: "none" } }), config)).toEqual(["scanNothing"]);
-    expect(eventsBetween(dash(withDrop), dash({ ...withDrop, scan: { kind: "signal", bearing: "N", close: false } }), config)).toEqual(["scanFar"]);
+    expect(eventsBetween(dash(withDrop), dash({ ...withDrop, scan: { origin, blips: [], close: false } }), config)).toEqual(["scanNothing"]);
+    expect(eventsBetween(dash(withDrop), dash({ ...withDrop, scan: { origin, blips: [0], close: false } }), config)).toEqual(["scanFar"]);
   });
 
   it("a pickup sound when a drop is collected", () => {

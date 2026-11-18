@@ -243,7 +243,7 @@ describe("hunters", () => {
     const hunter = world.targets.find((t) => t.kind === "hunter")!;
     const near = { ...createDashboardState(config), pos: { x: hunter.col, y: hunter.row } };
     expect(alertHunters(near, world)).toContain(world.targets.indexOf(hunter));
-    const far = { ...createDashboardState(config), pos: { x: hunter.col + world.directionRadius + 5, y: hunter.row } };
+    const far = { ...createDashboardState(config), pos: { x: hunter.col + world.scanRadius + 5, y: hunter.row } };
     expect(alertHunters(far, world)).not.toContain(world.targets.indexOf(hunter));
   });
 

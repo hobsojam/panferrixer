@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
-import { createDashboardState, bearingTo, markRuin, stepDashboard, worldFor, type DashboardState, type World } from "../src/dashboard";
+import { blipStrength, createDashboardState, markRuin, ringReach, stepDashboard, worldFor, type DashboardState, type World } from "../src/dashboard";
 import { updateApp, type AppState } from "../src/app";
 import { createInitialState } from "../src/flight";
 
@@ -74,52 +74,86 @@ describe("drops and ruins", () => {
 });
 
 describe("scanning", () => {
-  it("reports nothing when there are no ruins with drops", () => {
-    const s = stepDashboard(scanningAt(5, 5), ["activate"], DT, worldWith([])).state;
-    expect(s.scan).toEqual({ kind: "none" });
+  const scan = (s: DashboardState, world: World) => stepDashboard(s, ["activate"], DT, world).state;
+
+  it("finds nothing when there are no ruins with drops", () => {
+    expect(scan(scanningAt(5, 5), worldWith([])).scan?.blips).toEqual([]);
   });
 
-  it("reports nothing beyond the direction radius", () => {
-    const world = worldWith([{ col: 40, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
-    const s = stepDashboard({ ...scanningAt(5, 5), ruins: [0] }, ["activate"], DT, world).state;
-    expect(s.scan).toEqual({ kind: "none" });
+  it("finds nothing beyond the ring's reach", () => {
+    const world = worldWith([{ col: 5 + config.dashboard.scanRadius + 1, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
+    expect(scan({ ...scanningAt(5, 5), ruins: [0] }, world).scan?.blips).toEqual([]);
   });
 
-  it("gives a bearing within the direction radius but not close", () => {
-    const world = worldWith([{ col: 5 + 9, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
-    const s = stepDashboard({ ...scanningAt(5, 5), ruins: [0] }, ["activate"], DT, world).state;
-    expect(s.scan).toEqual({ kind: "signal", bearing: "E", close: false });
-  });
-
-  it("is close within the blip radius", () => {
-    const world = worldWith([{ col: 5, row: 5 - 3, kind: "dome", hasDrop: true, network: 0 }]);
-    const s = stepDashboard({ ...scanningAt(5, 5), ruins: [0] }, ["activate"], DT, world).state;
-    expect(s.scan).toEqual({ kind: "signal", bearing: "N", close: true });
-  });
-
-  it("ignores drops already found", () => {
-    const world = worldWith([{ col: 6, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
-    const s = stepDashboard({ ...scanningAt(5, 5), ruins: [0], found: [0] }, ["activate"], DT, world).state;
-    expect(s.scan).toEqual({ kind: "none" });
-  });
-
-  it("the nearest drop is the one reported", () => {
+  it("marks every ruin with a drop within reach, nearest first", () => {
     const world = worldWith([
       { col: 5, row: 5 + 10, kind: "dome", hasDrop: true, network: 0 },
-      { col: 5 + 9, row: 5, kind: "mine", hasDrop: true, network: 0 },
+      { col: 5 + 3, row: 5, kind: "mine", hasDrop: true, network: 0 },
+      { col: 5 - 8, row: 5, kind: "dome", hasDrop: true, network: 0 },
     ]);
-    const s = stepDashboard({ ...scanningAt(5, 5), ruins: [0, 1] }, ["activate"], DT, world).state;
-    expect(s.scan).toEqual({ kind: "signal", bearing: "E", close: false });
+    const s = scan({ ...scanningAt(5, 5), ruins: [0, 1, 2] }, world);
+    expect(s.scan?.blips).toEqual([1, 2, 0]);
+    expect(s.scan?.origin).toEqual({ x: 5, y: 5 });
+  });
+
+  it("does not mark ruins without a drop, buildings still standing, or drops already found", () => {
+    const world = worldWith([
+      { col: 6, row: 5, kind: "dome", hasDrop: false, network: 0 },
+      { col: 7, row: 5, kind: "dome", hasDrop: true, network: 0 },
+      { col: 8, row: 5, kind: "dome", hasDrop: true, network: 0 },
+      { col: 9, row: 5, kind: "dome", hasDrop: true, network: 0 },
+    ]);
+    const s = scan({ ...scanningAt(5, 5), ruins: [0, 2, 3], found: [3] }, world);
+    expect(s.scan?.blips).toEqual([2]);
+  });
+
+  it("is close when the nearest drop is within the close radius", () => {
+    const near = worldWith([{ col: 5, row: 5 - 3, kind: "dome", hasDrop: true, network: 0 }]);
+    const far = worldWith([{ col: 5 + 9, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
+    expect(scan({ ...scanningAt(5, 5), ruins: [0] }, near).scan?.close).toBe(true);
+    expect(scan({ ...scanningAt(5, 5), ruins: [0] }, far).scan?.close).toBe(false);
   });
 });
 
-describe("bearings", () => {
-  it("names the eight compass points, north up the map", () => {
-    const p = { x: 10, y: 10 };
-    expect(bearingTo(p, 10, 0)).toBe("N");
-    expect(bearingTo(p, 20, 10)).toBe("E");
-    expect(bearingTo(p, 10, 20)).toBe("S");
-    expect(bearingTo(p, 0, 10)).toBe("W");
-    expect(bearingTo(p, 20, 0)).toBe("NE");
+describe("blips", () => {
+  const world = worldWith([
+    { col: 5 + 2, row: 5, kind: "dome", hasDrop: true, network: 0 },
+    { col: 5 + 11, row: 5, kind: "dome", hasDrop: true, network: 0 },
+  ]);
+  const scanned = stepDashboard({ ...scanningAt(5, 5), ruins: [0, 1], time: 10 }, ["activate"], DT, world).state;
+  const at = (seconds: number, extra: Partial<DashboardState> = {}) => ({ ...scanned, time: scanned.pulseStarted! + seconds, ...extra });
+
+  it("the ring grows from nothing to full reach over the pulse", () => {
+    expect(ringReach(0, world)).toBe(0);
+    expect(ringReach(world.scanPulseSeconds / 2, world)).toBeGreaterThan(0.5);
+    expect(ringReach(world.scanPulseSeconds, world)).toBe(1);
+  });
+
+  it("a blip lights when the ring reaches it, so a near one lights before a far one", () => {
+    const early = world.scanPulseSeconds * 0.2;
+    expect(blipStrength(at(early), 0, world)).toBeGreaterThan(0);
+    expect(blipStrength(at(early), 1, world)).toBe(0);
+    expect(blipStrength(at(world.scanPulseSeconds), 1, world)).toBeGreaterThan(0);
+  });
+
+  it("a blip fades and then is gone", () => {
+    const lit = blipStrength(at(world.scanPulseSeconds), 0, world);
+    const later = blipStrength(at(world.scanPulseSeconds + world.blipSeconds / 2), 0, world);
+    expect(later).toBeGreaterThan(0);
+    expect(later).toBeLessThan(lit);
+    expect(blipStrength(at(world.scanPulseSeconds + world.blipSeconds), 0, world)).toBe(0);
+  });
+
+  it("stays where it was found when the robot moves away", () => {
+    const moved = at(world.scanPulseSeconds, { pos: { x: 40, y: 40 } });
+    expect(blipStrength(moved, 1, world)).toBeGreaterThan(0);
+  });
+
+  it("goes out once its drop is collected", () => {
+    expect(blipStrength(at(world.scanPulseSeconds, { found: [0] }), 0, world)).toBe(0);
+  });
+
+  it("a building the scan did not mark never shows a blip", () => {
+    expect(blipStrength(at(world.scanPulseSeconds), 5, world)).toBe(0);
   });
 });

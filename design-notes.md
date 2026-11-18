@@ -183,7 +183,11 @@ Very high scores (for example 96% in one Spectrum review). Praise: depth, the wi
 ### 4.2 Scanner redesign
 Manual and author agree on how the original works: the scanner is used after destroying a dome, standing in the ruins, and anything it shows is picked up automatically.
 
-**Under discussion [Author]:** nothing about a building's contents can be found before it is destroyed, so the unknown contents are part of the loot-box pull. Drops and parts are only findable after the building is gone, either lying where the missile hit or uncovered when the building falls. The rest of this section is the earlier proposal, which assumed some pre-fire scanning and needs revising once this is settled.
+**Decided [Author]:** nothing about a building's contents can be found before it is destroyed, so the unknown contents are part of the loot-box pull. Drops and parts are only findable after the building is gone, lying in its ruin.
+
+**Decided [Author]: sharp blips on the mini map.** A drop always lies on its ruin's cell, and the player knows where their ruins are, so there is no location to work out and fuzzy, triangulated blips have nothing to do. Instead, each scan marks every ruin within the ring's reach that still holds an uncollected drop. A mark lights as the ring passes over it and fades after a few seconds (placeholder in config), on both the local and the full map, so the player remembers or scans again. This replaces the bearing and close/far readout, which pointed at a place the player could already see; the readout now just counts what the scan found. On screen, drops are called **salvage** (decided, author), in keeping with the investigator's field labels (section 4.13): the readout says "SALVAGE AT 2 SITES" and "SALVAGE RECOVERED 1". "Drop" stays as the design and code term. Scan's job is "which of my ruins are worth walking to", paid for by the chance of waking hunters (section 4.10). If that proves too thin in play, the passive option below (nearby ruins show their contents without a verb) is the fallback.
+
+The rest of this section is the earlier proposal, which assumed some pre-fire scanning. It is kept for the record; where it conflicts with the decisions above, they win.
 
 The proposal gives it a different job:
 - A ping with a radius, shown on the map, with the radius as an upgrade stat.
