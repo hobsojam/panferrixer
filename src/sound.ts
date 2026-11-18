@@ -24,7 +24,8 @@ export type SoundEvent =
   | "incoming"
   | "gun"
   | "missileDown"
-  | "missileHit";
+  | "missileHit"
+  | "missileLaunch";
 
 /** The sounds that a change between two app states should make. Pure, so it can be tested. */
 export function eventsBetween(prev: AppState, next: AppState, cfg: Config): SoundEvent[] {
@@ -64,6 +65,9 @@ function dashboardEvents(prev: DashboardState, next: DashboardState, cfg: Config
 
 function defenceEvents(prev: DefenceState, next: DefenceState): SoundEvent[] {
   const events: SoundEvent[] = [];
+  // Each missile leaving the launcher thumps, so the player hears every volley ripple out.
+  const launched = (s: DefenceState) => s.missiles.filter((m) => m.spawn <= s.elapsed).length;
+  if (launched(next) > launched(prev)) events.push("missileLaunch");
   if (next.shots.length > prev.shots.length) events.push("gun");
   const count = (s: DefenceState, state: "shot" | "hit") => s.missiles.filter((m) => m.state === state).length;
   if (count(next, "shot") > count(prev, "shot")) events.push("missileDown");
@@ -183,6 +187,11 @@ const PLAY: Record<SoundEvent, Player> = {
       tone(c, t + i * 0.3, 1100, 0.12, "square", 0.08);
       tone(c, t + i * 0.3 + 0.13, 820, 0.12, "square", 0.08);
     }
+  },
+  // A distant launch: a low, muffled thump.
+  missileLaunch: (c, t) => {
+    noise(c, t, 0.18, 0.4, "lowpass", 500, 90);
+    tone(c, t, 90, 0.2, "sine", 0.35, 45);
   },
   // Kept short and quiet: it plays at the guns' rate of fire.
   gun: (c, t) => noise(c, t, 0.04, 0.12, "highpass", 3000, 1500),

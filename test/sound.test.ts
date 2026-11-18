@@ -119,6 +119,13 @@ describe("defence sounds", () => {
     expect(eventsBetween(defence(base), defence(hit), config)).toEqual(["missileHit"]);
   });
 
+  it("each missile leaving the launcher thumps", () => {
+    const first = base.missiles[0].spawn;
+    const before = { ...base, elapsed: first - DT / 2 };
+    const after = stepDefence(before, { yaw: 0, pitch: 0 }, false, DT, config);
+    expect(eventsBetween(defence(before), defence(after), config)).toEqual(["missileLaunch"]);
+  });
+
   it("an attack in progress with nothing happening is silent", () => {
     const next = stepDefence(base, { yaw: 0, pitch: 0 }, false, DT, config);
     expect(eventsBetween(defence(base), defence(next), config)).toEqual([]);
