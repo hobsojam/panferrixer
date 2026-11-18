@@ -1,6 +1,6 @@
 import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
-import { AVAILABLE_VERBS, VERB_GRID, buildingCells, gridDisableReady, isInsideBuilding, isLow, isPaused, isSuppressed, positionOf, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
+import { AVAILABLE_VERBS, VERB_GRID, blipStrength, buildingCells, gridDisableReady, isInsideBuilding, isLow, isPaused, isSuppressed, positionOf, ringReach, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
 import { drawCracks, tracePlate } from "./plates";
 import { drawGlow } from "./render";
@@ -308,6 +308,7 @@ function drawLocalMap(
     const [tx, ty] = toScreen(at.x, at.y);
     if (state.ruins.includes(index)) {
       drawRuin(ctx, tx, ty, c.panelDim);
+      drawBlip(ctx, tx, ty, 4, blipStrength(state, index, world), c.energy);
       return;
     }
     const inRange = targeting && state.target === index;
@@ -340,8 +341,8 @@ function drawLocalMap(
     });
   }
 
-  // The ring is centred on the robot, which sits in the middle of the local view.
-  drawPulse(ctx, state, world, cfg, x + w / 2, y + h / 2, world.directionRadius * cellW, world.directionRadius * cellH, [x, y, w, h]);
+  // The ring is centred where the robot stood when it scanned.
+  drawPulse(ctx, state, world, cfg, toScreen, world.scanRadius * cellW, world.scanRadius * cellH, [x, y, w, h]);
   drawRobot(ctx, x + w / 2, y + h / 2, state.time, c.panelSelected);
   ctx.restore();
 
@@ -349,25 +350,25 @@ function drawLocalMap(
 }
 
 /**
- * The ring from a scan: it grows out from the robot to the scan's reach and fades as it goes.
- * Clipped to the panel, so in the local view it is cut off at the edge.
+ * The ring from a scan: it grows out from where the robot scanned to the scan's reach and fades
+ * as it goes. Clipped to the panel, so in the local view it is cut off at the edge.
  */
 function drawPulse(
   ctx: CanvasRenderingContext2D,
   state: DashboardState,
   world: World,
   cfg: Config,
-  cx: number,
-  cy: number,
+  toScreen: (col: number, row: number) => [number, number],
   rx: number,
   ry: number,
   rect: [number, number, number, number]
 ): void {
-  if (state.pulseStarted === null) return;
+  if (state.pulseStarted === null || state.scan === null) return;
   const t = state.time - state.pulseStarted;
   if (t < 0 || t >= world.scanPulseSeconds) return;
   const k = t / world.scanPulseSeconds;
-  const grown = 1 - (1 - k) ** 2;
+  const grown = ringReach(t, world);
+  const [cx, cy] = toScreen(state.scan.origin.x, state.scan.origin.y);
   ctx.save();
   ctx.beginPath();
   ctx.rect(rect[0], rect[1], rect[2], rect[3]);
@@ -445,8 +446,14 @@ function drawFullMap(
     ctx.strokeRect(dx - 2.5, dy - 2.5, 5, 5);
   }
 
+  for (const index of state.scan?.blips ?? []) {
+    const t = world.targets[index];
+    const [bx, by] = toScreen(t.col, t.row);
+    drawBlip(ctx, bx, by, 2.5, blipStrength(state, index, world), c.energy);
+  }
+
   const [rx, ry] = toScreen(state.pos.x, state.pos.y);
-  drawPulse(ctx, state, world, cfg, rx, ry, world.directionRadius * cellW, world.directionRadius * cellH, [x, y, w, h]);
+  drawPulse(ctx, state, world, cfg, toScreen, world.scanRadius * cellW, world.scanRadius * cellH, [x, y, w, h]);
   drawRobot(ctx, rx, ry, state.time, c.panelSelected);
 
   drawText(ctx, "FULL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
@@ -490,13 +497,27 @@ function drawScanReadout(ctx: CanvasRenderingContext2D, state: DashboardState, c
   const result = state.scan;
   if (result === null) {
     drawText(ctx, "SPACE TO SCAN", x + 14, PANEL_TOP + 180, 16, c.panelSelected, 1, "monospace", "left");
-  } else if (result.kind === "none") {
+  } else if (result.blips.length === 0) {
     drawText(ctx, "NOTHING DETECTED", x + 14, PANEL_TOP + 180, 16, c.panelDim, 1, "monospace", "left");
   } else {
-    drawText(ctx, `BEARING ${result.bearing}`, x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
-    drawText(ctx, result.close ? "CLOSE" : "FAR", x + 14, PANEL_TOP + 204, 13, c.energy, 1, "monospace", "left");
+    const n = result.blips.length;
+    drawText(ctx, `${n} DROP${n === 1 ? "" : "S"} DETECTED`, x + 14, PANEL_TOP + 180, 16, c.energy, 1, "monospace", "left");
   }
   drawText(ctx, `DROPS FOUND ${state.found.length}`, x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
+}
+
+/** A scan's mark on a ruin that still holds a drop: a glowing dot that fades with strength. */
+function drawBlip(ctx: CanvasRenderingContext2D, cx: number, cy: number, radius: number, strength: number, color: string): void {
+  if (strength <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = strength;
+  drawGlow(ctx, color, 8 * strength, () => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
 }
 
 /** A destroyed building: two crossed lines, dim. */

@@ -51,7 +51,7 @@ function dashboardEvents(prev: DashboardState, next: DashboardState, cfg: Config
   if (next.mode === "targeting" && prev.mode === "targeting" && prev.target === null && next.target !== null) events.push("lock");
   if (prev.route.length === 0 && next.route.length > 0) events.push("confirm");
   if (next.scan !== prev.scan && next.scan !== null) {
-    if (next.scan.kind === "none") events.push("scanNothing");
+    if (next.scan.blips.length === 0) events.push("scanNothing");
     else events.push(next.scan.close ? "scanNear" : "scanFar");
   }
   if (next.found.length > prev.found.length) events.push("pickup");

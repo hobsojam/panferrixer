@@ -151,13 +151,14 @@ export const config = {
     startNode: 0, // index into the network map where the robot begins
     targetRange: 2, // in map cells, Chebyshev distance from the cross: a target is only selected this close
     pickupRadius: 1, // a drop within this many cells is picked up automatically
-    blipRadius: 6, // a scan within this many cells is marked close
-    directionRadius: 12, // a scan within this many cells gives a bearing
+    closeRadius: 6, // a hunter this close to a scan always wakes (design-notes 4.10)
+    scanRadius: 12, // how far a scan's ring reaches: drops in ruins within it show as blips
     walkSpeed: 3, // cells per second the robot walks across its local patch
     // Placeholders, not from the original. The window is the author's guess: play-test it.
     suppressionSeconds: 45, // how long a network's shields stay down after a power station is hit or grid disable is used
     gridDisableCooldownSeconds: 60, // time before grid disable can be used again
     scanPulseSeconds: 1.2, // how long a scan's ring takes to reach its full radius on the mini map
+    blipSeconds: 5, // how long a blip stays on the mini map after the ring lights it, fading as it goes
     hitsPerPlate: 3, // design-notes 4.9: each shield plate absorbs three missile hits
     hunterEngageRange: 6, // in map cells: an alerted hunter opens fire when the robot is this close
     // Placeholders for hunter behaviour (design-notes 4.10 and 4.14). Tuned by playtest.

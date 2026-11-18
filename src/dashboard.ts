@@ -16,14 +16,16 @@ export const VERB_GRID: readonly (readonly Verb[])[] = [
 
 export const AVAILABLE_VERBS: readonly Verb[] = ["move", "scan", "missile", "gridDisable"];
 
-/** Eight compass points, north first, clockwise. */
-export const BEARINGS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
-export type Bearing = (typeof BEARINGS)[number];
-
-/** What a scan found. Closer gives more: a bearing within the direction range, and a close flag inside the blip range. */
-export type ScanResult =
-  | { kind: "none" }
-  | { kind: "signal"; bearing: Bearing; close: boolean };
+/**
+ * What a scan found (design-notes 4.2): every ruin within the ring's reach that still holds an
+ * uncollected drop, nearest first, and where the robot stood when it scanned. Each blip lights as
+ * the ring passes over it and then fades.
+ */
+export interface ScanResult {
+  origin: Point;
+  blips: number[]; // target indices of ruins with a drop
+  close: boolean; // the nearest blip is within the close radius, for the sound
+}
 
 export interface Cross {
   col: number;
@@ -46,11 +48,12 @@ export interface World {
   range: number;
   walkSpeed: number; // cells per second
   pickupRadius: number; // a drop within this many cells is collected automatically
-  blipRadius: number; // a scan within this many cells is marked close
-  directionRadius: number; // a scan within this many cells gives a bearing
+  closeRadius: number; // a hunter this close to a scan always wakes
+  scanRadius: number; // how far a scan's ring reaches
   suppressionSeconds: number; // how long a network's shields stay down once opened
   gridDisableCooldownSeconds: number; // time before grid disable can be used again
   scanPulseSeconds: number; // how long a scan's ring takes to reach its full radius
+  blipSeconds: number; // how long a blip stays lit after the ring reaches it
   hunterSpeed: number; // cells per second
   hunterLeashCells: number; // how far an alerted hunter chases from its post
   attackBreatherSeconds: number; // after any incoming attack, no enemy may start one for this long (design-notes 4.10)
@@ -133,11 +136,12 @@ export function worldFor(cfg: Config): World {
       range: cfg.dashboard.targetRange,
       walkSpeed: cfg.dashboard.walkSpeed,
       pickupRadius: cfg.dashboard.pickupRadius,
-      blipRadius: cfg.dashboard.blipRadius,
-      directionRadius: cfg.dashboard.directionRadius,
+      closeRadius: cfg.dashboard.closeRadius,
+      scanRadius: cfg.dashboard.scanRadius,
       suppressionSeconds: cfg.dashboard.suppressionSeconds,
       gridDisableCooldownSeconds: cfg.dashboard.gridDisableCooldownSeconds,
       scanPulseSeconds: cfg.dashboard.scanPulseSeconds,
+      blipSeconds: cfg.dashboard.blipSeconds,
       hunterSpeed: cfg.dashboard.hunterSpeed,
       hunterLeashCells: cfg.dashboard.hunterLeashCells,
       attackBreatherSeconds: cfg.dashboard.attackBreatherSeconds,
@@ -475,9 +479,9 @@ function rearmPoint(s: DashboardState, index: number, world: World): Point {
  * scan's close zone, then falling steadily to nothing at the edge of the ring.
  */
 export function scanWakeChance(distance: number, world: World): number {
-  if (distance <= world.blipRadius) return 1;
-  if (distance >= world.directionRadius) return 0;
-  return (world.directionRadius - distance) / (world.directionRadius - world.blipRadius);
+  if (distance <= world.closeRadius) return 1;
+  if (distance >= world.scanRadius) return 0;
+  return (world.scanRadius - distance) / (world.scanRadius - world.closeRadius);
 }
 
 /**
@@ -659,32 +663,41 @@ function collectDrops(s: DashboardState, world: World): DashboardState {
   return { ...s, found: [...s.found, ...picked] };
 }
 
-/** The nearest uncollected drop, read as a signal: none, far (a bearing), or close as well. */
+/** Every uncollected drop in a ruin within the scan's reach, nearest first. */
 function scanFrom(s: DashboardState, world: World): ScanResult {
-  let best: Target | null = null;
-  let bestDistance = Infinity;
-  for (const i of s.ruins) {
-    const t = world.targets[i];
-    if (!t.hasDrop || s.found.includes(i)) continue;
-    const d = distanceTo(s.pos, t.col, t.row);
-    if (d < bestDistance) {
-      best = t;
-      bestDistance = d;
-    }
-  }
-  if (best === null || bestDistance > world.directionRadius) return { kind: "none" };
-  return {
-    kind: "signal",
-    bearing: bearingTo(s.pos, best.col, best.row),
-    close: bestDistance <= world.blipRadius,
-  };
+  const origin = { x: s.pos.x, y: s.pos.y };
+  const blips = s.ruins
+    .filter((i) => world.targets[i].hasDrop && !s.found.includes(i))
+    .map((i) => ({ i, d: distanceTo(origin, world.targets[i].col, world.targets[i].row) }))
+    .filter(({ d }) => d <= world.scanRadius)
+    .sort((a, b) => a.d - b.d);
+  return { origin, blips: blips.map(({ i }) => i), close: blips.length > 0 && blips[0].d <= world.closeRadius };
 }
 
-/** Compass bearing from the robot to a point. North is up the map (smaller row numbers). */
-export function bearingTo(pos: Point, x: number, y: number): Bearing {
-  const degrees = (Math.atan2(x - pos.x, pos.y - y) * 180) / Math.PI;
-  const normalised = (degrees + 360) % 360;
-  return BEARINGS[Math.round(normalised / 45) % 8];
+/**
+ * How far the scan's ring has reached, as a fraction of its full radius, this many seconds after
+ * the scan. It starts fast and slows as it nears the edge. The mini map draws the same curve.
+ */
+export function ringReach(t: number, world: World): number {
+  if (t <= 0) return 0;
+  if (t >= world.scanPulseSeconds) return 1;
+  const k = t / world.scanPulseSeconds;
+  return 1 - (1 - k) ** 2;
+}
+
+/**
+ * How brightly a ruin's blip shows now, from 0 (not shown) to 1: dark until the ring reaches it,
+ * then fading to nothing over blipSeconds. A drop collected since the scan no longer shows.
+ */
+export function blipStrength(s: DashboardState, index: number, world: World): number {
+  if (s.scan === null || s.pulseStarted === null || !s.scan.blips.includes(index) || s.found.includes(index)) return 0;
+  const t = world.targets[index];
+  const fraction = Math.min(1, distanceTo(s.scan.origin, t.col, t.row) / world.scanRadius);
+  // Invert ringReach: the time at which the ring arrives at this distance.
+  const arrives = world.scanPulseSeconds * (1 - Math.sqrt(1 - fraction));
+  const since = s.time - s.pulseStarted - arrives;
+  if (since < 0 || since >= world.blipSeconds) return 0;
+  return 1 - since / world.blipSeconds;
 }
 
 function movingAction(s: DashboardState, action: Action, world: World): DashboardState {
