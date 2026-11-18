@@ -60,12 +60,14 @@ export const HILL_STEP = 4;
 export const HILL_SPAN = 100;
 
 /**
- * The attack, all from the seed: volleys of 3 to 5 missiles from the one launcher, each
- * arriving from its own point across the sky, and a hill silhouette for the horizon.
+ * The attack, all from the seed and the hunter's range: volleys of 3 to 5 missiles from
+ * the one launcher, each arriving from its own point across the sky, and a hill
+ * silhouette for the horizon. A nearer hunter's missiles arrive sooner.
  */
-export function createDefence(seed: number, cfg: Config): DefenceState {
+export function createDefence(seed: number, cfg: Config, rangeCells: number = cfg.dashboard.hunterEngageRange): DefenceState {
   const d = cfg.defence;
   const rng = createRng(seed);
+  const travel = missileTravelFor(rangeCells, cfg);
   const launcher = { yaw: 0, pitch: d.launcherPitchDegrees };
   const missiles: Missile[] = [];
   for (let v = 0; v < d.volleys; v++) {
@@ -75,7 +77,7 @@ export function createDefence(seed: number, cfg: Config): DefenceState {
       const spawn = start + i * d.missileSpacingSeconds;
       missiles.push({
         spawn,
-        arrive: spawn + d.missileTravelSeconds,
+        arrive: spawn + travel,
         from: launcher,
         // Never beyond the arc, so every missile can be turned toward.
         to: {
@@ -90,6 +92,16 @@ export function createDefence(seed: number, cfg: Config): DefenceState {
   }
   const hills = Array.from({ length: Math.floor((2 * HILL_SPAN) / HILL_STEP) + 1 }, () => rangeFloat(rng, 0.3, 2.6));
   return { elapsed: 0, yaw: launcher.yaw, pitch: 0, launcher, missiles, shots: [], lastShot: -Infinity, hills, done: false };
+}
+
+/**
+ * How long an incoming missile takes from a hunter this many map cells away (design-notes
+ * 4.10): quickest from point blank, slowest from the edge of the hunter's engagement range.
+ */
+export function missileTravelFor(rangeCells: number, cfg: Config): number {
+  const near = cfg.defence.missileTravelNearSeconds;
+  const far = cfg.defence.missileTravelSeconds;
+  return near + (far - near) * clamp(rangeCells / cfg.dashboard.hunterEngageRange, 0, 1);
 }
 
 /** True during the warning beat before the first missile leaves the launcher. */

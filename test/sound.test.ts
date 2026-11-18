@@ -99,7 +99,7 @@ describe("flight sounds", () => {
 
 describe("defence sounds", () => {
   const dashboard = createDashboardState(config);
-  const defence = (d: DefenceState): AppState => ({ screen: "defence", dashboard, defence: d });
+  const defence = (d: DefenceState): AppState => ({ screen: "defence", dashboard, defence: d, attacker: 0 });
   const base = createDefence(4, config);
 
   it("the alarm sounds as an attack takes the screen", () => {

@@ -25,6 +25,7 @@ export type FlightPhase = "flight" | "terminal" | "hit" | "crash" | "miss";
 export interface FlightState {
   seed: number;
   depth: number;
+  totalDistance: number; // this flight's course length: shorter for a nearer target
   x: number; // lateral position, -1..1; also the direction-marker position
   velocityX: number;
   roll: number; // radians; cosmetic bank into the turn

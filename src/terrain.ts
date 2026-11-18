@@ -143,19 +143,29 @@ function generateStretches(rng: Rng, tc: Config["terrain"], bandCount: number): 
 }
 
 /**
+ * Where the terminal approach begins on a course of this length. The approach is the same
+ * length on every course (that of the longest flight), so a short flight to a near target
+ * loses only the stretch before it, never the approach to the target.
+ */
+export function terminalStart(totalDistance: number, cfg: Config): number {
+  const approachLength = cfg.flight.totalDistance * (1 - cfg.terminalPhase.startFraction);
+  return Math.max(0, totalDistance - approachLength);
+}
+
+/**
  * Generates a terrain for the given seed. Passes are carved by construction,
  * but passes in neighbouring bands can still fail to line up within steering
  * range, so the result is validated with `findPassablePath` and regenerated
  * (from a derived sub-seed, still deterministic) until a passable path is
  * found or the attempt budget runs out.
  */
-export function generateTerrain(seed: number, cfg: Config): Terrain {
+export function generateTerrain(seed: number, cfg: Config, totalDistance: number = cfg.flight.totalDistance): Terrain {
   const tc = cfg.terrain;
   const flightHeight = cfg.camera.height;
-  const terminalStartDepth = cfg.flight.totalDistance * cfg.terminalPhase.startFraction;
+  const terminalStartDepth = terminalStart(totalDistance, cfg);
   const bandDepths: number[] = [];
   // Mountains run all the way to the target, so there is no empty stretch before it.
-  for (let depth = tc.bandSpacing; depth < cfg.flight.totalDistance; depth += tc.bandSpacing) {
+  for (let depth = tc.bandSpacing; depth < totalDistance; depth += tc.bandSpacing) {
     bandDepths.push(depth);
   }
 

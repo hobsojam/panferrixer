@@ -2,6 +2,7 @@ import type { Config } from "./config";
 import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
 import { drawDust, drawExplosion } from "./explosion";
 import type { TargetKind } from "./local-map";
+import { terminalStart } from "./terrain";
 import type { FlightState } from "./types";
 
 // Horizontal lines run past the canvas so banking never exposes a bare corner.
@@ -146,9 +147,9 @@ function drawMountains(ctx: CanvasRenderingContext2D, state: FlightState, cfg: C
 
 /** The target sits on the launch heading, so both its art and the hit burst share this anchor. */
 function targetAnchor(state: FlightState, cfg: Config, horizonY: number): { centerX: number; centerY: number; size: number } {
-  const { totalDistance } = cfg.flight;
-  const terminalStart = totalDistance * cfg.terminalPhase.startFraction;
-  const progress = clamp((state.depth - terminalStart) / (totalDistance - terminalStart), 0, 1);
+  const { totalDistance } = state;
+  const approachStart = terminalStart(totalDistance, cfg);
+  const progress = clamp((state.depth - approachStart) / (totalDistance - approachStart), 0, 1);
   const size = 30 + 230 * progress;
 
   return {
