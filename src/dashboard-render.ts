@@ -1,6 +1,6 @@
 import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
-import { AVAILABLE_VERBS, VERB_GRID, buildingCells, gridDisableReady, isInsideBuilding, isLow, isSuppressed, positionOf, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
+import { AVAILABLE_VERBS, VERB_GRID, buildingCells, gridDisableReady, isInsideBuilding, isLow, isPaused, isSuppressed, positionOf, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
 import { drawCracks, tracePlate } from "./plates";
 import { drawGlow } from "./render";
@@ -323,6 +323,8 @@ function drawLocalMap(
     ctx.globalAlpha = 1;
   });
 
+  if (isPaused(state)) drawTimeStopped(ctx, x, y, w, h, cfg);
+
   if (state.mode !== "browse") {
     const [cx, cy] = toScreen(state.cross.col, state.cross.row);
     drawCross(ctx, cx, cy, c.panelSelected);
@@ -427,6 +429,8 @@ function drawFullMap(
     ctx.arc(tx, ty, 1, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  if (isPaused(state)) drawTimeStopped(ctx, x, y, w, h, cfg);
 
   if (state.mode !== "browse") {
     const [cx, cy] = toScreen(state.cross.col, state.cross.row);
@@ -571,6 +575,18 @@ function traceUnit(ctx: CanvasRenderingContext2D, shape: "cell" | "plate", x: nu
   } else {
     tracePlate(ctx, x, y, w, h);
   }
+}
+
+/**
+ * Time stops while a chooser is open (design-notes 4.10): the map dims under the cross and
+ * says so, so the stillness reads as deliberate rather than a freeze.
+ */
+function drawTimeStopped(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, cfg: Config): void {
+  ctx.globalAlpha = 0.35;
+  ctx.fillStyle = cfg.colors.background;
+  ctx.fillRect(x, y, w, h);
+  ctx.globalAlpha = 1;
+  drawText(ctx, "TIME STOPPED", x + w - 6, y + 8, 11, cfg.colors.panelSelected, 0.9, "monospace", "right");
 }
 
 function drawPanelFrame(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string): void {

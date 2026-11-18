@@ -3,6 +3,7 @@ import {
   applyShieldHits,
   createDashboardState,
   hunterInRange,
+  isPaused,
   isShielded,
   leaveTargeting,
   markRuin,
@@ -10,6 +11,7 @@ import {
   networkOf,
   openWindow,
   positionOf,
+  spendAttack,
   stepDashboard,
   worldFor,
   type Action,
@@ -19,7 +21,6 @@ import {
 import { createDefence, hitCount, stepDefence, summaryOver, type Aim, type DefenceState } from "./defence";
 import { createInitialState, flightSecondsFor, updateFlight } from "./flight";
 import type { Target } from "./local-map";
-import { createRng } from "./rng";
 import type { FlightState } from "./types";
 
 /**
@@ -81,8 +82,11 @@ export function updateApp(
 
   if (state.screen === "dashboard") {
     const step = stepDashboard(state.dashboard, input.actions, dt, world);
-    // Hunters move in real time, on every screen, so they keep coming during a flight or an attack.
-    const dashboard = moveHunters(step.state, world, dt);
+    // Hunters move in real time, on every screen, so they keep coming during a flight or an
+    // attack. While a chooser is open time stops (design-notes 4.10): they hold still, and
+    // nobody attacks.
+    const paused = isPaused(state.dashboard);
+    const dashboard = paused ? step.state : moveHunters(step.state, world, dt);
     if (step.fire) {
       return {
         screen: "flight",
@@ -94,9 +98,10 @@ export function updateApp(
         shielded: isShielded(dashboard, step.fire),
       };
     }
-    // An alerted hunter that is close enough, and ready again, opens fire. Its alert stays,
-    // so it keeps coming after the attack until it leaves its leash or dies. A nearer
-    // hunter's missiles arrive sooner. Its cooldown starts when the attack ends.
+    if (paused) return { screen: "dashboard", dashboard };
+    // An alerted hunter that is close enough, and ready, opens fire, unless the breather after
+    // the last attack is still running. A nearer hunter's missiles arrive sooner. There is no
+    // breather after the player's own flight: fights alternate turns.
     const hunter = hunterInRange(dashboard, world, cfg.dashboard.hunterEngageRange);
     if (hunter !== null) {
       const defence = createDefence(newSeed(), cfg, rangeTo(dashboard, hunter, world));
@@ -113,11 +118,13 @@ export function updateApp(
     const defence = stepDefence(state.defence, input.aim ?? { yaw: 0, pitch: 0 }, fire, dt, cfg);
     // Over, but the summary shows for a moment before the dashboard returns by itself.
     if (!summaryOver(defence, cfg)) return { ...state, dashboard: timed, defence };
-    // The attack is over: every missile that got through is a hit on the shields. The
-    // hunter then holds off long enough for the player to strike back (design-notes 4.10).
+    // The attack is over: every missile that got through is a hit on the shields. Then a short
+    // breather, so the player always has time to open Missile (which stops time) and strike
+    // back. The attacker spends one from its magazine, and withdraws to rearm once it is empty
+    // (design-notes 4.10).
     const hit = applyShieldHits(timed, hitCount(defence), cfg.dashboard.hitsPerPlate);
-    const cooldown = world.hunterCooldownSeconds + createRng(newSeed())() * world.hunterCooldownRandomSeconds;
-    return { screen: "dashboard", dashboard: { ...hit, hunterReadyAt: { ...hit.hunterReadyAt, [state.attacker]: hit.time + cooldown } } };
+    const spent = spendAttack(hit, state.attacker, world);
+    return { screen: "dashboard", dashboard: { ...spent, breatherUntil: spent.time + world.attackBreatherSeconds } };
   }
 
   // Flight: presses are ignored, so a key tapped mid-flight cannot skip the result.
