@@ -501,9 +501,9 @@ function drawScanReadout(ctx: CanvasRenderingContext2D, state: DashboardState, c
     drawText(ctx, "NOTHING DETECTED", x + 14, PANEL_TOP + 180, 16, c.panelDim, 1, "monospace", "left");
   } else {
     const n = result.blips.length;
-    drawText(ctx, `${n} DROP${n === 1 ? "" : "S"} DETECTED`, x + 14, PANEL_TOP + 180, 16, c.energy, 1, "monospace", "left");
+    drawText(ctx, `SALVAGE AT ${n} SITE${n === 1 ? "" : "S"}`, x + 14, PANEL_TOP + 180, 16, c.energy, 1, "monospace", "left");
   }
-  drawText(ctx, `DROPS FOUND ${state.found.length}`, x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
+  drawText(ctx, `SALVAGE RECOVERED ${state.found.length}`, x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
 }
 
 /** A scan's mark on a ruin that still holds a drop: a glowing dot that fades with strength. */
