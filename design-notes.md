@@ -379,3 +379,137 @@ Author-direction: aggression (storming in guns blazing, standing off, or running
   - **No per-enemy reload.** Instead each hunter carries a **magazine of 2 attacks**. When it is empty it **retreats to rearm** at a free cell beside the nearest intact dome in its network (its post if the network has none), rearms for **30 seconds**, then returns to its post **no longer alerted**, so it has to spot the robot again. A retreating or rearming hunter does not notice the robot and cannot be woken by a scan. This answers the earlier objection to enemy ammunition (invisible to the player): the player sees the hunter break off and leave. It gives the pressure a natural end, a choice (chase it and strike it as it withdraws, or use the quiet for the real objective), and keeps running away viable. The magazine is a per-enemy dial: a hunter 2, a hauler perhaps 1, a boss unlimited.
   - **Parked:** destroying the dome a hunter rearms at, leaving it unable to rearm. A good interaction, but it belongs with the wider supply chain.
   - Unchanged: the first-attack delay of 1 to 3 seconds after an alert, and range shaping both strikes.
+
+### 4.11 Enemy point defence
+Author's idea: the player has a defensive gun (working name: CIWS, as on ships); tougher enemies, perhaps enemy military installations, could have defences too.
+- Fits one hit, one kill: tough targets are harder to reach, not tougher to kill. It also mirrors the player's own gun.
+- Rule: never a dice roll. A random shoot-down after 30 seconds of good flying would feel terrible; the defence must be something the player plays against.
+- Terminal-phase hazard: on a defended target the last few seconds add tracer fire sweeping across the view, which the player weaves through with the same left and right controls. Same skill, more intense finish, no new instrument.
+- **Author's decision:** the terminal-phase hazard is the preferred form. The dashboard counter below is **not to be implemented for now; consider later.** Reasons: the author does not like switching from missile to cockpit and back, and if a boss must be hit with the EMP before firing, the game has to signal that somehow.
+- Deferred: counterable from the dashboard: a powered defence is knocked out by the grid-disabler for the window, giving the EMP a second use and making "disable first, then strike" a plan. (The pre-launch jamming counter in section 4.1 is deferred for the same reasons.)
+- Later option: arcs of fire, so the approach direction (where the player fires from) matters.
+- Tiering, as with countermeasures: none on standard enemies; present on tougher enemies and military installations; heaviest on bosses. With jamming on the direction marker, a late target can be hard at both ends of the flight while still dying to one hit.
+- Passes the four tests: creates decisions (dodge, or disable first); readable if tracers are distinct; fits in 30 seconds; appears only after the basic flight is learned.
+
+### 4.12 Technology (agreed by the author as a starting point; it could be reimplemented in different tech later)
+- **TypeScript with the browser's 2D canvas, no game engine.** Wrap as a Windows desktop app later if wanted.
+- Reasons: the game is lines, panels and state machines and needs no physics, 3D or asset pipeline; everything is code and text, which suits building with Claude Code; rules can be tested automatically and visuals checked with headless-browser screenshots; instant reload for feel-testing; canvas line drawing with a little glow gives the vector-display look.
+- Structure: a simulation core with a fixed timestep and a seeded random generator (reproducible runs, maps shareable by seed); all tuning values in config files; three screens as a state machine (dashboard, missile flight, missile defence); an input layer mapping keyboard and mouse to the same actions; logic kept separate from rendering so a later port is easier.
+- Alternatives considered: Godot 4 (conventional engine, built-in export and controller support, more than this game needs); C++ with raylib (native, good fit for the graphics, slower to iterate and harder to verify automatically).
+- Trade-off: it runs in a browser first; on Windows that means opening a local page until it is wrapped.
+
+### 4.13 Setting
+**Concept [Author-direction]:** an installation found on another planet. It is not clear what it is, perhaps something like one of the closed "atomic cities" of the USSR, but we do not really know. We were sent to investigate.
+
+**What that gives us:**
+- No justification needed for the hardware. A sealed, self-sufficient, heavily guarded installation that is on no map can have weapons, factories, a power grid and guard machines without the player ever being told why. This answers the author's question of why the machine would have cruise missiles.
+- The mystery is the reason to explore: the player was sent to find out what the place is, which is the same drive as finding the next upgrade, with a question behind it.
+- The installation is still running: mines dig, haulers carry, domes build machines, machines guard the mines. An economy working flat out with nobody visibly in charge.
+
+**Proposals that follow from it [Proposal]:**
+- Names are the investigator's field labels. Nobody knows what the machines are called, so they are named by what they do (runner, hauler, guard, hunter), and buildings likewise (power source; structure, purpose unknown). These are the role names already used in this document.
+- The catalogue is the investigator's field notes. It fills in as things are encountered and is how the story is told, with no cutscenes. (This replaces the original's Info icon.)
+- The player's robot could be one of the installation's own machines, found on site and merged with, not brought along. That would explain why it has a will of its own and sometimes overrules the player, why it is armed, and why its upgrades are buried under the installation's buildings.
+- Tone: deliberate, sealed-off, a little melancholy; not the original's war between two factions. Avoid the original's red-versus-blue colour identity.
+
+**Open:**
+- Who built it? People, in a lost or secret programme (closest to the atomic-city idea); unknown builders (stranger, and the machines need not make human sense); or never answered. Lean: never fully answered, perhaps a hint when the last piece is recovered.
+- Who the player is, beyond "sent to investigate".
+- What the six pieces add up to in this setting, and what the ending is.
+
+**Alternatives considered:** a dead or unfinished mining colony (close to the setting of the 1985 game Tau Ceti; the premise is common ground and fine to reuse, but it leaves the weapons unexplained unless they are repurposed tools such as blasting drones); a colony security force; an openly military outpost.
+
+**Title:** not chosen. Checked so far: "Terminal Phase" is already an existing space shooter (dropped); "Carapace" is used by several itch.io projects (crowded); "Blue Moon" is a place name in the original's backstory (avoid); "Nap of the Earth" turned up no game of that name in one search (candidate, not cleared). Choose the title once the setting is firmer, and check any candidate against Steam, itch.io and the trademark registers before publishing.
+
+### 4.14 Enemy build plan (proposal, not yet agreed)
+- **Why the hunter first:** the patroller has "defensive guns only, no missiles" (section 2.6), but the missile-defence mini-game starts on an incoming missile. Only the hunter (one per network, with guns and missiles) can start it, so slice 1 uses the hunter.
+- **Slice 1: one hunter per network.**
+  1. Hunter on the map: one per network, patrolling a beat between that network's buildings, shown on the mini map. It stays on its beat until alerted.
+  2. Alert: a scan ring (section 4.2) that reaches the hunter alerts it, and it heads for the robot.
+  3. Engagement: when in range, it fires 3 volleys of 3 to 5 missiles (about 12 in total) over about 10 seconds, and the missile-defence mini-game starts (sections 4.8 and 4.9).
+  4. Damage: each missile that gets through is one hit. A shield plate absorbs 3 hits, and there are 8 plates (24 hits), as in section 4.9. Shields are the robot's own, so grid disable does not affect them.
+  5. Kill: one missile hit destroys the hunter (section 4.10). It is not replaced in this slice.
+- **Slice 2:** the patroller, which runs for help when it confirms an intruder, and the defender, which stays in its dome until alerted.
+- **Slice 3:** the hauler, which flees and takes its cargo with it. Bosses come last.
+  - Decided (author): no escort for the hauler for now. Revisit if playtesting shows haulers are easy prey.
+- **Hunter behaviour (agreed by the author, section 4.10 stances):** a scan no longer starts an attack. It alerts the hunter, and the hunter becomes a live enemy with these stages:
+  1. **Idle:** stays at its post, unaware.
+  2. **Alerted:** a scan's ring reached it. It moves toward the robot.
+  3. **Engaging:** the robot is within engage range. A short warning, then the attack, as above.
+  4. **Chasing:** it keeps pursuing while the robot is within its leash. Its leash is about two towns' distance from its post.
+  5. **Dead:** a missile hit.
+  - An alerted hunter stays alerted until it leaves its leash or dies. There is no timer for losing track.
+  - Once it is dead it stays dead for good.
+  - Clarified: a destroyed hauler leaves its cargo to be picked up with the scanner (section 2.6), so killing it is a reward. Fleeing is what takes the cargo away (section 4.10).
+- **Decisions still open for slice 1** (placeholders until agreed):
+  - Hits per plate: 3 (section 4.9), or 2 for the tighter option in 4.9.
+  - Tuning target: section 4.9 says an average player loses about one plate per encounter. The table in 4.9 gives about two plates at half shot down, so this needs checking in playtesting.
+  - Engagement and timers: the shield window keeps running during an engagement (decided).
+- **Controls:** keyboard only for the defence mini-game, as for the rest of the game. The mouse option in section 4.8 is not wanted for now.
+
+## 5. Proof of concept plan
+- One network's worth: a handful of domes plus a power plant, one enemy type (a patroller), and the full missile loop (select, launch, guide, hit, drop, pick up). [Author-direction]
+- Verbs: Move, Scan, Missile first; add the grid-disabler when shielded domes arrive. Piece collection is automatic.
+- Hand-built map, so missile feel can be tuned without a generator moving the goalposts.
+- Data-driven: buildings, drops and enemy placement in config, so generation can be added later without a rewrite.
+- Prototype toggles for feel-testing: classic controls versus altitude bands; distance indicator off, marker change or audio ping; the scanner radius and cooldown.
+- Grow in steps: more buildings, more enemy behaviours, more networks, then the full map.
+
+### 5.1 First slice to build: the missile flight on its own
+A single playable page, no dashboard or map yet. Done when all of this works:
+- Forward-looking wireframe view: horizon line, mountain silhouettes, a direction marker along the top edge. Our own art; nothing copied from the original.
+- Controls: left and right only, via arrow keys and via horizontal mouse movement.
+- The marker starts centred, moves off-centre only as the player steers, and clamps at the edge when far off course. No wrap-around.
+- Mountains: the visible silhouette is the hitbox. Generated from a seed, with a check that a passable path always exists.
+- Flight lasts about 30 seconds (in config). Near the end, line art of the target appears and the player must fly into it.
+- Three outcomes: hit (give this the polish), crash into a mountain (explosion), and miss ("missed" message). A key restarts with a new seed.
+- Engineering: fixed timestep, seeded random generator, all tuning values in one config file, logic separate from drawing, and an automated test for the passable-path rule.
+- Stub the feel-test toggles so they can be added next: distance indicator (none, marker change, audio ping) and altitude bands (off).
+
+## 6. Open questions
+1. **Scope:** a compact game or the full original structure (ten networks, six pieces)? [Author: start small, grow]
+2. Fixed map per game, or generated? Deferred; the PoC uses a hand-built map.
+3. **Missile restock:** how are missiles replenished in the original (the manual does not say in the pages that cover the icons)? Candidates: upgrades, cargo drops, somewhere else.
+4. Energy (one slowly ticking-down bank of cells): empty means death or immobilisation (author, section 3). Still open: what exactly drains it, and which of the two. Proposal: immobilisation, since it is cheap to build and death then follows naturally from enemy attacks, with a reprieve if energy is within pickup reach. It needs a guard against a soft-lock when nothing is nearby (a short timer to death, or the original's "abandon" control), a clear low-energy warning, and reliable refill sources (hauler cargo), or it will feel unfair.
+5. What does destroying a beacon actually do in the original? The manual lists it as a valid missile target.
+6. How large is the scanner's real range (the manual says "immediate vicinity", the author observes zero)?
+7. Missile defence: starts automatically (section 2.9a); controls, enemy-dependent length (about 10 seconds for a standard enemy, never over about a minute) and the no-interrupt-during-flight rule are settled (section 3). Still open: how many missiles per attack, and whether the shield window and cooldowns keep running during an engagement.
+8. Margin for error around mountains, and the length of a full playthrough.
+9. Altitude bands: yes or no? Distance indicator: yes or no? (Both decided by feel-testing.)
+10. Setting: concept chosen (section 4.13); still open are who built the installation, who the player is, what the pieces add up to, and the title and visual identity. (Engine and language are settled: section 4.12.)
+11. Power station drops: stays indestructible with energy from haulers, or changes?
+12. **Damage model** (partly decided): zero shields is death (author). Shields are shown as armour plates alongside battery cells for energy (agreed, section 4.6). Still open: how much damage each enemy's missile does, how repair works (armour from mines, restoration on upgrade), and whether damage degrades systems or only counts down. What death costs is settled (section 3, item 19). The original manual says a missile that strikes "damages or destroys" the robot, and saving was not possible while the robot felt threatened.
+
+## 7. Deferred topics
+- **Cluster overlap at mini-map scale** [Author-raised]: tested with four domes packed into about three local-map cells at 16 pixels. The icons merge into a blob, and the selected one is lost inside a cluster. Options: spread overlapping icons within their cells; show one icon with a count, and let the cross pick among the members; or enlarge the local view around the cross. Decide once clusters are placed by the generator, and check it with mixed building kinds too.
+- Enemy attacks and the missile-defence mini-game: the author asked to return to this later. It has since been described (sections 2.9a and 4.8); remaining detail to settle: the damage model, missiles per attack, and timer interactions. A hard cap on simultaneous attackers protects this mini-game from overload.
+
+- Dashboard counters to enemy defences, both deferred by the author: using the grid-disabler to knock out point defences before firing (section 4.11), and player jamming against enemy countermeasures (section 4.1). Reasons: no switching from missile to cockpit and back; any pre-firing requirement would need signalling; jamming a jammer sounds like an arms race.
+
+## 8. Next steps
+- [ ] Answer the remaining open questions (above), especially 1, 3 and 4
+- [x] Choose a new setting: an unexplained installation on another planet (section 4.13)
+- [ ] Choose a title and visual identity (no overlap with the original's)
+- [ ] Build the PoC: one network, the missile loop, one enemy type
+- [x] Pick an engine and language: TypeScript with the 2D canvas (section 4.12)
+- [ ] Start prototyping, with this document as the starting spec; first slice is the missile flight
+
+## 9. Remaining playtest checks (Amstrad emulator)
+Most of the earlier checklist is now answered by the manual and the author's notes. Still worth checking in about 10-20 minutes of play:
+- [ ] How many missiles are carried, and how are they replenished?
+- [ ] What drains the batteries (they tick down slowly), and what happens when they run low?
+- [ ] How much margin there is when passing mountains in the missile flight.
+- [ ] Missile defence: how many missiles come per attack, and whether the shield window keeps running during it.
+- [ ] What destroying a beacon does.
+- [ ] What each building type drops, if anything besides pieces.
+- [ ] How long it takes to find the first upgrade, and a full playthrough.
+- [ ] The most frustrating and the most satisfying moment.
+
+## 10. Sources
+- Instruction manual, "The Battle Begins" (Spectrum 48K and Amstrad), Software Communications Ltd, 1985. Supplied by the author; used as a reference for mechanics and paraphrased, not copied.
+- CRASH #25 review (Spectrum): https://crashonline.org.uk/25/zoids.htm
+- ZZAP!64 #12 review (C64), via Gamebase64: https://gb64.com/oldsite/gameofweek/12/gotw_zoids.htm
+- Computer Gamer #13 (C64): https://everygamegoing.com/larticle/Zoids-000/34614
+- Commodore User #30 (C64): https://everygamegoing.com/larticle/zoids-000/53046
+- Wikipedia: https://en.wikipedia.org/wiki/Zoids:_The_Battle_Begins
+- The author's own screenshots and drawn map of the Amstrad version.
