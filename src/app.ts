@@ -9,14 +9,17 @@ import {
   moveHunters,
   networkOf,
   openWindow,
+  positionOf,
   stepDashboard,
   worldFor,
   type Action,
   type DashboardState,
+  type World,
 } from "./dashboard";
 import { createDefence, hitCount, stepDefence, type Aim, type DefenceState } from "./defence";
-import { createInitialState, updateFlight } from "./flight";
+import { createInitialState, flightSecondsFor, updateFlight } from "./flight";
 import type { Target } from "./local-map";
+import { createRng } from "./rng";
 import type { FlightState } from "./types";
 
 /**
@@ -27,7 +30,7 @@ import type { FlightState } from "./types";
 export type AppState =
   | { screen: "dashboard"; dashboard: DashboardState }
   | { screen: "flight"; dashboard: DashboardState; flight: FlightState; target: Target; targetIndex: number; shielded: boolean }
-  | { screen: "defence"; dashboard: DashboardState; defence: DefenceState };
+  | { screen: "defence"; dashboard: DashboardState; defence: DefenceState; attacker: number };
 
 export interface AppInput {
   actions: readonly Action[]; // discrete presses this step; ignored during flight
@@ -42,6 +45,12 @@ export function createAppState(cfg: Config): AppState {
 
 function isResult(phase: FlightState["phase"]): boolean {
   return phase === "hit" || phase === "crash" || phase === "miss";
+}
+
+/** How far the robot is from a target, in map cells. A hunter may have moved from its post. */
+function rangeTo(dashboard: DashboardState, index: number, world: World): number {
+  const p = positionOf(dashboard, index, world);
+  return Math.hypot(p.x - dashboard.pos.x, p.y - dashboard.pos.y);
 }
 
 /** Pure fixed-timestep update for the whole app. */
@@ -62,21 +71,20 @@ export function updateApp(
       return {
         screen: "flight",
         dashboard,
-        flight: createInitialState(newSeed(), cfg),
+        // A nearer target is a shorter flight (design-notes 4.10).
+        flight: createInitialState(newSeed(), cfg, flightSecondsFor(rangeTo(dashboard, world.targets.indexOf(step.fire), world), cfg)),
         target: step.fire,
         targetIndex: world.targets.indexOf(step.fire),
         shielded: isShielded(dashboard, step.fire),
       };
     }
     // An alerted hunter that is close enough, and ready again, opens fire. Its alert stays,
-    // so it keeps coming after the attack until it leaves its leash or dies.
+    // so it keeps coming after the attack until it leaves its leash or dies. A nearer
+    // hunter's missiles arrive sooner. Its cooldown starts when the attack ends.
     const hunter = hunterInRange(dashboard, world, cfg.dashboard.hunterEngageRange);
     if (hunter !== null) {
-      const readied: DashboardState = {
-        ...dashboard,
-        hunterReadyAt: { ...dashboard.hunterReadyAt, [hunter]: dashboard.time + world.hunterReloadSeconds },
-      };
-      return { screen: "defence", dashboard: readied, defence: createDefence(newSeed(), cfg) };
+      const defence = createDefence(newSeed(), cfg, rangeTo(dashboard, hunter, world));
+      return { screen: "defence", dashboard, defence, attacker: hunter };
     }
     return { screen: "dashboard", dashboard };
   }
@@ -87,10 +95,12 @@ export function updateApp(
     // A fresh press fires as well as holding, so a quick tap is never lost between steps.
     const fire = (input.fire ?? false) || input.actions.includes("activate");
     const defence = stepDefence(state.defence, input.aim ?? { yaw: 0, pitch: 0 }, fire, dt, cfg);
-    if (!defence.done) return { screen: "defence", dashboard: timed, defence };
-    // The attack is over: every missile that got through is a hit on the shields.
+    if (!defence.done) return { ...state, dashboard: timed, defence };
+    // The attack is over: every missile that got through is a hit on the shields. The
+    // hunter then holds off long enough for the player to strike back (design-notes 4.10).
     const hit = applyShieldHits(timed, hitCount(defence), cfg.dashboard.hitsPerPlate);
-    return { screen: "dashboard", dashboard: hit };
+    const cooldown = world.hunterCooldownSeconds + createRng(newSeed())() * world.hunterCooldownRandomSeconds;
+    return { screen: "dashboard", dashboard: { ...hit, hunterReadyAt: { ...hit.hunterReadyAt, [state.attacker]: hit.time + cooldown } } };
   }
 
   // Flight: presses are ignored, so a key tapped mid-flight cannot skip the result.

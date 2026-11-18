@@ -1,5 +1,6 @@
 import type { Config } from "./config";
 import { generateWorld, inTown, townCentres, type LocalMap, type Target, type Town } from "./local-map";
+import { createRng } from "./rng";
 import { cellKey, findRoute, findRouteToAny, isPassable, OFFSETS, type Blocked } from "./route";
 
 /** The four verbs from design-notes 4.6. All four work. */
@@ -52,7 +53,10 @@ export interface World {
   scanPulseSeconds: number; // how long a scan's ring takes to reach its full radius
   hunterSpeed: number; // cells per second
   hunterLeashCells: number; // how far an alerted hunter chases from its post
-  hunterReloadSeconds: number; // time between attacks from the same hunter
+  hunterCooldownSeconds: number; // guaranteed quiet after an attack ends (design-notes 4.10)
+  hunterCooldownRandomSeconds: number; // plus up to this much more
+  hunterFirstAttackDelayMin: number; // the wait before a newly alerted hunter's first attack
+  hunterFirstAttackDelayMax: number;
 }
 
 export interface DashboardState {
@@ -116,7 +120,10 @@ export function worldFor(cfg: Config): World {
       scanPulseSeconds: cfg.dashboard.scanPulseSeconds,
       hunterSpeed: cfg.dashboard.hunterSpeed,
       hunterLeashCells: cfg.dashboard.hunterLeashCells,
-      hunterReloadSeconds: cfg.dashboard.hunterReloadSeconds,
+      hunterCooldownSeconds: cfg.dashboard.hunterCooldownSeconds,
+      hunterCooldownRandomSeconds: cfg.dashboard.hunterCooldownRandomSeconds,
+      hunterFirstAttackDelayMin: cfg.dashboard.hunterFirstAttackDelayMin,
+      hunterFirstAttackDelayMax: cfg.dashboard.hunterFirstAttackDelayMax,
     };
   }
   return cachedWorld;
@@ -296,6 +303,22 @@ export function alertHunters(s: DashboardState, world: World): number[] {
 }
 
 /**
+ * A newly alerted hunter waits a moment before its first attack (design-notes 4.10), so it
+ * does not open fire the instant the robot is in range. The wait is drawn from the clock and
+ * the hunter, so it is reproducible. A hunter still cooling down keeps its longer wait.
+ */
+export function delayFirstAttacks(s: DashboardState, alerted: readonly number[], world: World): Record<number, number> {
+  const ready = { ...s.hunterReadyAt };
+  for (const index of alerted) {
+    if (s.alerted.includes(index)) continue;
+    const roll = createRng(Math.floor(s.time * 1000) * 31 + index)();
+    const wait = world.hunterFirstAttackDelayMin + roll * (world.hunterFirstAttackDelayMax - world.hunterFirstAttackDelayMin);
+    ready[index] = Math.max(ready[index] ?? 0, s.time + wait);
+  }
+  return ready;
+}
+
+/**
  * The first alerted hunter that is close enough to open fire, or null. A hunter that
  * has been destroyed cannot fire.
  */
@@ -412,7 +435,10 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
       return { ...s, mode: "moving", cross };
     }
-    if (verb === "scan") return { ...s, scan: scanFrom(s, world), pulseStarted: s.time, alerted: alertHunters(s, world) };
+    if (verb === "scan") {
+      const alerted = alertHunters(s, world);
+      return { ...s, scan: scanFrom(s, world), pulseStarted: s.time, alerted, hunterReadyAt: delayFirstAttacks(s, alerted, world) };
+    }
     if (verb === "gridDisable" && gridDisableReady(s)) {
       // Choose a power station with the cross, the same way as a missile target.
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };

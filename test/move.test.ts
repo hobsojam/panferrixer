@@ -23,7 +23,10 @@ const flatWorld: World = {
   scanPulseSeconds: config.dashboard.scanPulseSeconds,
   hunterSpeed: config.dashboard.hunterSpeed,
   hunterLeashCells: config.dashboard.hunterLeashCells,
-  hunterReloadSeconds: config.dashboard.hunterReloadSeconds,
+  hunterCooldownSeconds: config.dashboard.hunterCooldownSeconds,
+  hunterCooldownRandomSeconds: config.dashboard.hunterCooldownRandomSeconds,
+  hunterFirstAttackDelayMin: config.dashboard.hunterFirstAttackDelayMin,
+  hunterFirstAttackDelayMax: config.dashboard.hunterFirstAttackDelayMax,
 };
 
 function step(state: DashboardState, actions: Action[], dt = DT, w: World = flatWorld): DashboardState {

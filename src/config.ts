@@ -15,8 +15,10 @@ export const config = {
   },
 
   flight: {
-    durationSeconds: 30,
-    totalDistance: 3000, // forwardSpeed = totalDistance / durationSeconds
+    durationSeconds: 30, // the longest flight; a nearer target is quicker (design-notes 4.10)
+    totalDistance: 3000, // the longest course; forwardSpeed = totalDistance / durationSeconds
+    baseSeconds: 10, // a flight takes this long plus secondsPerCell for each map cell to the target
+    secondsPerCell: 3,
   },
 
   steering: {
@@ -97,7 +99,8 @@ export const config = {
     volleys: 3,
     volleyGapSeconds: 2.8, // time between volley starts
     missileSpacingSeconds: 0.15, // between missiles in one volley
-    missileTravelSeconds: 2.2, // from launch to arrival
+    missileTravelSeconds: 2.6, // from launch to arrival, from the edge of the hunter's engagement range
+    missileTravelNearSeconds: 1.6, // from point blank: closer attacks leave less time (design-notes 4.10)
     // The turret (design-notes 4.8): the view turns within a limited forward arc. Widen the
     // arc toward free aiming, narrow it toward fixed. The view starts facing the launcher.
     arcYawDegrees: 45, // the view can turn this far left or right of the launcher
@@ -153,7 +156,11 @@ export const config = {
     // Placeholders for hunter behaviour (design-notes 4.10 and 4.14). Tuned by playtest.
     hunterSpeed: 2, // cells per second when it moves
     hunterLeashCells: 30, // how far from its post an alerted hunter will chase before it gives up (about two towns)
-    hunterReloadSeconds: 12, // time between one attack and the next from the same hunter
+    // Attack pacing (design-notes 4.10): the player must always have time to strike back.
+    hunterCooldownSeconds: 12, // guaranteed quiet after an attack ends, enough to launch a strike
+    hunterCooldownRandomSeconds: 6, // plus up to this much more, so attacks are not a metronome
+    hunterFirstAttackDelayMin: 1, // after an alert, a hunter waits this long before its first attack
+    hunterFirstAttackDelayMax: 3,
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
 
