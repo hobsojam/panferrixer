@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
-import { createDashboardState, hunterInRange, moveHunters, positionOf, worldFor, type DashboardState } from "../src/dashboard";
+import { createDashboardState, hunterInRange, isInsideBuilding, moveHunters, positionOf, routeTo, worldFor, type DashboardState, type World } from "../src/dashboard";
+import { mapOf } from "./helpers";
 
 const DT = 1 / 60;
 const world = worldFor(config);
@@ -64,5 +65,34 @@ describe("hunter stages", () => {
   it("a destroyed hunter does not move", () => {
     const s: DashboardState = { ...createDashboardState(config), pos: robotAway(3), alerted: [hunterIndex], ruins: [hunterIndex] };
     expect(positionOf(run(s, 2), hunterIndex, world)).toEqual(post);
+  });
+});
+
+describe("hunters and buildings (design-notes 4.7)", () => {
+  // A hunter at (2, 1) and a solid wall of domes down column 4: the robot could never cross it.
+  const rows = 3;
+  const wall = Array.from({ length: rows }, (_, row) => ({ col: 4, row, kind: "dome" as const, hasDrop: false, network: 0 }));
+  const walled: World = {
+    ...world,
+    map: mapOf(Array(rows).fill("1".repeat(9))),
+    towns: [],
+    targets: [{ col: 2, row: 1, kind: "hunter", hasDrop: false, network: 0 }, ...wall],
+  };
+  const chasing: DashboardState = { ...createDashboardState(config), pos: { x: 6, y: 1 }, alerted: [0] };
+
+  it("the wall blocks the robot", () => {
+    expect(routeTo({ ...chasing, pos: { x: 2, y: 1 } }, { col: 6, row: 1 }, walled)).toBeNull();
+  });
+
+  it("an alerted hunter passes through a building to reach the robot", () => {
+    let s = chasing;
+    for (let i = 0; i < 10 / DT; i++) s = moveHunters(s, walled, DT);
+    expect(positionOf(s, 0, walled)).toEqual({ x: 6, y: 1 });
+  });
+
+  it("is shown as inside the building while it passes through", () => {
+    const inside = { ...chasing, hunterPos: { 0: { x: 4, y: 1 } } };
+    expect(isInsideBuilding(inside, 0, walled)).toBe(true);
+    expect(isInsideBuilding(chasing, 0, walled)).toBe(false);
   });
 });

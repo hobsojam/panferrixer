@@ -1,9 +1,9 @@
 import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
-import { AVAILABLE_VERBS, VERB_GRID, gridDisableReady, isLow, isSuppressed, positionOf, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
+import { AVAILABLE_VERBS, VERB_GRID, buildingCells, gridDisableReady, isInsideBuilding, isLow, isSuppressed, positionOf, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
 import { drawGlow } from "./render";
-import { findRoute } from "./route";
+import { cellKey } from "./route";
 
 const VERB_LABELS: Record<Verb, string> = {
   move: "MOVE",
@@ -208,14 +208,15 @@ function drawGridReadout(ctx: CanvasRenderingContext2D, state: DashboardState, c
 
 function drawMovingReadout(ctx: CanvasRenderingContext2D, state: DashboardState, world: World, cfg: Config, x: number): void {
   const c = cfg.colors;
-  const reachable = findRoute(state.pos, { x: state.cross.col, y: state.cross.row }, world.map) !== null;
+  const reachable = routeTo(state, state.cross, world) !== null;
+  const onBuilding = buildingCells(state, world).has(cellKey(world.map, state.cross.col, state.cross.row));
   drawText(ctx, "WALK TO", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
   if (reachable) {
     drawText(ctx, "CHOOSE A POINT", x + 14, PANEL_TOP + 180, 16, c.panelSelected, 1, "monospace", "left");
-    drawText(ctx, "SPACE TO WALK THERE", x + 14, PANEL_TOP + 204, 12, c.energy, 1, "monospace", "left");
+    drawText(ctx, onBuilding ? "SPACE TO WALK BESIDE IT" : "SPACE TO WALK THERE", x + 14, PANEL_TOP + 204, 12, c.energy, 1, "monospace", "left");
   } else {
     drawText(ctx, "NO ROUTE THERE", x + 14, PANEL_TOP + 180, 16, c.panelDim, 1, "monospace", "left");
-    drawText(ctx, "HIGH GROUND BLOCKS THE WAY", x + 14, PANEL_TOP + 204, 11, c.text, 0.7, "monospace", "left");
+    drawText(ctx, "THE WAY IS BLOCKED", x + 14, PANEL_TOP + 204, 11, c.text, 0.7, "monospace", "left");
   }
 }
 
@@ -311,7 +312,8 @@ function drawLocalMap(
     const inRange = targeting && state.target === index;
     const color = inRange ? c.panelSelected : c.text;
     const iconWidth = cfg.dashboard.targetIconWidth;
-    ctx.globalAlpha = targeting && !inRange ? 0.6 : 1;
+    // An enemy passing through a building is drawn faint, so it reads as inside, not a glitch.
+    ctx.globalAlpha = isInsideBuilding(state, index, world) ? 0.3 : targeting && !inRange ? 0.6 : 1;
     if (hasArt(t.kind)) {
       strokeArt(ctx, BUILDING_ART[t.kind]!.simple, tx, ty + iconWidth / 4, iconWidth / 2, color, 1.2, inRange ? 6 : 0);
     } else {

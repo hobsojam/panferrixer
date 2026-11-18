@@ -1,6 +1,6 @@
 import type { Config } from "./config";
 import { generateWorld, inTown, townCentres, type LocalMap, type Target, type Town } from "./local-map";
-import { findRoute } from "./route";
+import { cellKey, findRoute, findRouteToAny, isPassable, OFFSETS, type Blocked } from "./route";
 
 /** The four verbs from design-notes 4.6. All four work. */
 export type Verb = "move" | "scan" | "missile" | "gridDisable";
@@ -192,6 +192,47 @@ export function cellOf(s: DashboardState, index: number, world: World): Cross {
   return { col: Math.round(p.x), row: Math.round(p.y) };
 }
 
+/** True for a target that is a building. Hunters are enemies, not buildings. */
+export function isBuilding(t: Target): boolean {
+  return t.kind !== "hunter";
+}
+
+/**
+ * The cells the robot cannot enter on top of the terrain: every intact building
+ * (design-notes 4.7). A ruin is passable rubble. The power station is never a ruin,
+ * so it always blocks.
+ */
+export function buildingCells(s: DashboardState, world: World): Blocked {
+  const blocked = new Set<number>();
+  world.targets.forEach((t, index) => {
+    if (isBuilding(t) && !s.ruins.includes(index)) blocked.add(cellKey(world.map, t.col, t.row));
+  });
+  return blocked;
+}
+
+/** True while an enemy is passing through an intact building, so the map can show it inside. */
+export function isInsideBuilding(s: DashboardState, index: number, world: World): boolean {
+  if (isBuilding(world.targets[index])) return false;
+  const at = cellOf(s, index, world);
+  return buildingCells(s, world).has(cellKey(world.map, at.col, at.row));
+}
+
+/**
+ * The route the robot would walk to a chosen cell, or null if there is none. High
+ * ground is refused. A building has no way in, so choosing one walks to the nearest
+ * free cell beside it instead.
+ */
+export function routeTo(s: DashboardState, cell: Cross, world: World): Point[] | null {
+  const blocked = buildingCells(s, world);
+  if (!blocked.has(cellKey(world.map, cell.col, cell.row))) {
+    return findRoute(s.pos, { x: cell.col, y: cell.row }, world.map, blocked);
+  }
+  const beside = OFFSETS.map(([dx, dy]) => ({ x: cell.col + dx, y: cell.row + dy })).filter((c) =>
+    isPassable(world.map, c.x, c.y, blocked)
+  );
+  return findRouteToAny(s.pos, beside, world.map, blocked);
+}
+
 /** Walks along a route for up to `distance` cells. Returns where it ends up and the route still to go. */
 export function walkPoint(pos: Point, route: readonly Point[], distance: number): { pos: Point; route: Point[] } {
   let p = { ...pos };
@@ -231,6 +272,8 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
     const alerted = next.alerted.includes(index);
     if (!alerted && here.x === post.x && here.y === post.y) return;
     const goal = alerted ? { x: Math.round(next.pos.x), y: Math.round(next.pos.y) } : post;
+    // Enemies may pass through buildings but never stop on one (design-notes 4.7). Both goals
+    // are open ground: the robot cannot stand on a building, and a post is never one.
     const route = findRoute({ x: Math.round(here.x), y: Math.round(here.y) }, goal, world.map);
     if (route === null) return;
     const walked = walkPoint(here, route, world.hunterSpeed * dt);
@@ -425,7 +468,8 @@ function movingAction(s: DashboardState, action: Action, world: World): Dashboar
   if (action === "cancel") return { ...s, mode: "browse" };
   if (action === "activate") {
     // High ground, or ground that cannot be reached, is refused: the chooser stays open.
-    const route = findRoute(s.pos, { x: s.cross.col, y: s.cross.row }, world.map);
+    // A building is walked up to, not into.
+    const route = routeTo(s, s.cross, world);
     if (route === null) return s;
     return { ...s, mode: "browse", route };
   }
