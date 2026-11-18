@@ -163,9 +163,10 @@ export const config = {
     // Placeholders for hunter behaviour (design-notes 4.10 and 4.14). Tuned by playtest.
     hunterSpeed: 2, // cells per second when it moves
     hunterLeashCells: 30, // how far from its post an alerted hunter will chase before it gives up (about two towns)
-    // Attack pacing (design-notes 4.10): the player must always have time to strike back.
-    hunterCooldownSeconds: 12, // guaranteed quiet after an attack ends, enough to launch a strike
-    hunterCooldownRandomSeconds: 6, // plus up to this much more, so attacks are not a metronome
+    // Attack pacing and turn-taking (design-notes 4.10): the player must always have time to strike back.
+    attackBreatherSeconds: 3, // after any incoming attack, no enemy may start one: time to open Missile, which stops time
+    hunterMagazineAttacks: 2, // attacks a hunter makes before withdrawing to rearm
+    hunterRearmSeconds: 30, // how long it rearms at a dome before going home
     hunterFirstAttackDelayMin: 1, // after an alert, a hunter waits this long before its first attack
     hunterFirstAttackDelayMax: 3,
     // Hunters are always looking (design-notes 4.10): coming this close to one alerts it.

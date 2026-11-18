@@ -53,8 +53,9 @@ export interface World {
   scanPulseSeconds: number; // how long a scan's ring takes to reach its full radius
   hunterSpeed: number; // cells per second
   hunterLeashCells: number; // how far an alerted hunter chases from its post
-  hunterCooldownSeconds: number; // guaranteed quiet after an attack ends (design-notes 4.10)
-  hunterCooldownRandomSeconds: number; // plus up to this much more
+  attackBreatherSeconds: number; // after any incoming attack, no enemy may start one for this long (design-notes 4.10)
+  hunterMagazineAttacks: number; // attacks a hunter can make before it must rearm
+  hunterRearmSeconds: number; // how long rearming takes at a dome
   hunterFirstAttackDelayMin: number; // the wait before a newly alerted hunter's first attack
   hunterFirstAttackDelayMax: number;
   hunterSightCells: number; // a hunter this close to the robot sees it (design-notes 4.10)
@@ -94,13 +95,19 @@ export interface DashboardState {
   hunterReadyAt: Record<number, number>;
   // Hunters sent to look at a place, such as a cut power station: where, and when the search
   // ends (null until it arrives). Missing means it is not investigating.
-  investigating: Record<number, Investigation>;
+  investigating: Record<number, Errand>;
+  // Hunters that have used their magazine and gone to rearm: where, and when rearming ends.
+  rearming: Record<number, Errand>;
+  // Attacks each hunter has made from its current magazine.
+  attacksUsed: Record<number, number>;
+  // Dashboard time until which no enemy may start an attack: the breather after an attack.
+  breatherUntil: number;
   // Hits taken on the top shield plate so far. A plate goes when it reaches hitsPerPlate.
   shieldHits: number;
 }
 
-/** A hunter sent to look at a place: it walks there, searches for a while, then goes home. */
-export interface Investigation {
+/** A hunter sent somewhere (to search, or to rearm): it walks there, stays a while, then goes home. */
+export interface Errand {
   x: number;
   y: number;
   until: number | null;
@@ -133,8 +140,9 @@ export function worldFor(cfg: Config): World {
       scanPulseSeconds: cfg.dashboard.scanPulseSeconds,
       hunterSpeed: cfg.dashboard.hunterSpeed,
       hunterLeashCells: cfg.dashboard.hunterLeashCells,
-      hunterCooldownSeconds: cfg.dashboard.hunterCooldownSeconds,
-      hunterCooldownRandomSeconds: cfg.dashboard.hunterCooldownRandomSeconds,
+      attackBreatherSeconds: cfg.dashboard.attackBreatherSeconds,
+      hunterMagazineAttacks: cfg.dashboard.hunterMagazineAttacks,
+      hunterRearmSeconds: cfg.dashboard.hunterRearmSeconds,
       hunterFirstAttackDelayMin: cfg.dashboard.hunterFirstAttackDelayMin,
       hunterFirstAttackDelayMax: cfg.dashboard.hunterFirstAttackDelayMax,
       hunterSightCells: cfg.dashboard.hunterSightCells,
@@ -172,6 +180,9 @@ export function createDashboardState(cfg: Config): DashboardState {
     hunterPos: {},
     hunterReadyAt: {},
     investigating: {},
+    rearming: {},
+    attacksUsed: {},
+    breatherUntil: 0,
     shieldHits: 0,
   };
 }
@@ -210,6 +221,15 @@ export function startPosition(world: World, cfg: Config): Point {
     }
   }
   return { x: home.x, y: home.y };
+}
+
+/**
+ * True while a cross chooser is open (Missile, Grid Disable or Move): time stops
+ * (design-notes 4.10). The arrow-key chooser is only how a human talks to the robot's
+ * targeting computer, which thinks at machine speed.
+ */
+export function isPaused(s: DashboardState): boolean {
+  return s.mode === "targeting" || s.mode === "moving";
 }
 
 /** The network a target belongs to: the town it was placed in. */
@@ -320,7 +340,8 @@ export function walkPoint(pos: Point, route: readonly Point[], distance: number)
  * first attack, and drops any search it was on.
  */
 export function alertTo(s: DashboardState, indices: readonly number[], world: World): DashboardState {
-  const fresh = indices.filter((i) => !s.alerted.includes(i));
+  // A hunter withdrawing to rearm has nothing to attack with, and does not turn back.
+  const fresh = indices.filter((i) => !s.alerted.includes(i) && !s.rearming[i]);
   if (fresh.length === 0) return s;
   const investigating = { ...s.investigating };
   for (const i of fresh) delete investigating[i];
@@ -331,9 +352,10 @@ export function alertTo(s: DashboardState, indices: readonly number[], world: Wo
  * Moves the hunters (design-notes 4.10). Every hunter is always looking: one that comes
  * within sight of the robot is alerted, whatever it was doing. An alerted hunter closes
  * to its preferred range and holds there while it attacks, and breaks off once the robot
- * is beyond its leash. A hunter sent to
- * investigate walks there, searches for a while, then goes home. Otherwise it walks back
- * to its post. A destroyed hunter does not move.
+ * is beyond its leash. A hunter sent to investigate walks there, searches for a while,
+ * then goes home. A hunter that has used its magazine withdraws to a dome, rearms, then
+ * goes home no longer alerted. Otherwise it walks back to its post. A destroyed hunter
+ * does not move.
  */
 export function moveHunters(s: DashboardState, world: World, dt: number): DashboardState {
   let next = s;
@@ -341,15 +363,31 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
     if (t.kind !== "hunter" || next.ruins.includes(index)) return;
     const post = { x: t.col, y: t.row };
     const here = positionOf(next, index, world);
-    if (distanceTo(next.pos, here.x, here.y) <= world.hunterSightCells) next = alertTo(next, [index], world);
+    if (distanceTo(next.pos, here.x, here.y) <= world.hunterSightCells) next = alertTo(next, [index], world); // a rearming hunter is skipped
     if (next.alerted.includes(index) && Math.hypot(here.x - post.x, here.y - post.y) > world.hunterLeashCells) {
       next = { ...next, alerted: next.alerted.filter((i) => i !== index) };
     }
     const alerted = next.alerted.includes(index);
-    const search = alerted ? undefined : next.investigating[index];
+    const rearm = next.rearming[index];
+    const search = alerted || rearm ? undefined : next.investigating[index];
 
     let goal: Point;
-    if (alerted) {
+    if (rearm) {
+      if (here.x === rearm.x && here.y === rearm.y) {
+        // At the dome: rearm, then go home with a full magazine.
+        if (rearm.until === null) {
+          next = { ...next, rearming: { ...next.rearming, [index]: { ...rearm, until: next.time + world.hunterRearmSeconds } } };
+        } else if (next.time >= rearm.until) {
+          const rearming = { ...next.rearming };
+          delete rearming[index];
+          const attacksUsed = { ...next.attacksUsed };
+          delete attacksUsed[index];
+          next = { ...next, rearming, attacksUsed };
+        }
+        return;
+      }
+      goal = { x: rearm.x, y: rearm.y };
+    } else if (alerted) {
       // Close to the preferred range, then hold. Never halt inside a building: carry on through it.
       const inside = buildingCells(next, world).has(cellKey(world.map, Math.round(here.x), Math.round(here.y)));
       if (distanceTo(next.pos, here.x, here.y) <= world.hunterHoldCells && !inside) return;
@@ -401,6 +439,37 @@ export function investigateOutage(s: DashboardState, station: Target, world: Wor
   return { ...s, investigating: { ...s.investigating, [index]: { ...beside[0], until: null } } };
 }
 
+/**
+ * A hunter has made an attack (design-notes 4.10). It spends one from its magazine; once the
+ * magazine is empty it breaks off and withdraws to rearm at a free cell beside the nearest
+ * intact dome in its network, or at its post if the network has none.
+ */
+export function spendAttack(s: DashboardState, index: number, world: World): DashboardState {
+  const used = (s.attacksUsed[index] ?? 0) + 1;
+  const spent = { ...s, attacksUsed: { ...s.attacksUsed, [index]: used } };
+  if (used < world.hunterMagazineAttacks) return spent;
+  return { ...spent, alerted: spent.alerted.filter((i) => i !== index), rearming: { ...spent.rearming, [index]: { ...rearmPoint(spent, index, world), until: null } } };
+}
+
+/** Where a hunter rearms: beside the nearest intact dome in its network, or its post. */
+function rearmPoint(s: DashboardState, index: number, world: World): Point {
+  const hunter = world.targets[index];
+  const here = positionOf(s, index, world);
+  const blocked = buildingCells(s, world);
+  const nearest = (cells: Point[]) => cells.sort((a, b) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(b.x - here.x, b.y - here.y))[0];
+  const domes = world.targets
+    .map((t, i) => ({ t, i }))
+    .filter(({ t, i }) => t.kind === "dome" && t.network === hunter.network && !s.ruins.includes(i))
+    .map(({ t }) => ({ x: t.col, y: t.row }));
+  const dome = nearest(domes);
+  if (dome) {
+    const beside = OFFSETS.map(([dx, dy]) => ({ x: dome.x + dx, y: dome.y + dy })).filter((c) => isPassable(world.map, c.x, c.y, blocked));
+    const spot = nearest(beside);
+    if (spot) return spot;
+  }
+  return { x: hunter.col, y: hunter.row };
+}
+
 /** A scan's ring alerts every living hunter it reaches. Alerted hunters stay alerted until they engage. */
 export function alertHunters(s: DashboardState, world: World): number[] {
   const found = new Set(s.alerted);
@@ -415,7 +484,7 @@ export function alertHunters(s: DashboardState, world: World): number[] {
 /**
  * A newly alerted hunter waits a moment before its first attack (design-notes 4.10), so it
  * does not open fire the instant the robot is in range. The wait is drawn from the clock and
- * the hunter, so it is reproducible. A hunter still cooling down keeps its longer wait.
+ * the hunter, so it is reproducible. A longer wait already set is kept.
  */
 export function delayFirstAttacks(s: DashboardState, alerted: readonly number[], world: World): Record<number, number> {
   const ready = { ...s.hunterReadyAt };
@@ -433,9 +502,11 @@ export function delayFirstAttacks(s: DashboardState, alerted: readonly number[],
  * has been destroyed cannot fire.
  */
 export function hunterInRange(s: DashboardState, world: World, range: number): number | null {
+  // The breather after an attack: nobody may start another yet.
+  if (s.time < s.breatherUntil) return null;
   for (const index of s.alerted) {
     const t = world.targets[index];
-    if (!t || t.kind !== "hunter" || s.ruins.includes(index)) continue;
+    if (!t || t.kind !== "hunter" || s.ruins.includes(index) || s.rearming[index]) continue;
     if (s.time < (s.hunterReadyAt[index] ?? 0)) continue;
     const p = positionOf(s, index, world);
     if (distanceTo(s.pos, p.x, p.y) <= range) return index;
@@ -477,7 +548,8 @@ export function selectedVerb(state: DashboardState): Verb {
  * and reports a confirmed target. The walk keeps going whatever the mode.
  */
 export function stepDashboard(state: DashboardState, actions: readonly Action[], dt: number, world: World): DashboardStep {
-  let s: DashboardState = walkStep({ ...state, time: state.time + dt }, dt, world.walkSpeed);
+  // While a chooser is open, time stops: no clock, no walking.
+  let s: DashboardState = isPaused(state) ? state : walkStep({ ...state, time: state.time + dt }, dt, world.walkSpeed);
   s = { ...s, location: townIndexAt(s.pos, world, s.location) };
   s = collectDrops(s, world);
 

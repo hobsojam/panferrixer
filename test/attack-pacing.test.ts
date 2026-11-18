@@ -24,34 +24,6 @@ function besideAlertedHunter(): AppState {
   return { screen: "dashboard", dashboard: { ...createDashboardState(config), pos: { x: hunter.col, y: hunter.row }, alerted: [hunterIndex] } };
 }
 
-describe("cooldown after an attack", () => {
-  it("counts from the end of the attack: at least the minimum, at most the minimum plus the random part", () => {
-    const attacking = updateApp(besideAlertedHunter(), { actions: [], steering: 0 }, DT, config, () => 5);
-    expect(attacking.screen).toBe("defence");
-    const back = runWhile(attacking, "defence", 30);
-    expect(back.screen).toBe("dashboard");
-    const ready = back.dashboard.hunterReadyAt[hunterIndex];
-    expect(ready - back.dashboard.time).toBeGreaterThanOrEqual(config.dashboard.hunterCooldownSeconds - DT);
-    expect(ready - back.dashboard.time).toBeLessThanOrEqual(config.dashboard.hunterCooldownSeconds + config.dashboard.hunterCooldownRandomSeconds);
-  });
-
-  it("leaves the player the guaranteed window to strike back, even standing beside the hunter", () => {
-    const attacking = updateApp(besideAlertedHunter(), { actions: [], steering: 0 }, DT, config, () => 5);
-    const back = runWhile(attacking, "defence", 30);
-    const quiet = runWhile(back, "dashboard", config.dashboard.hunterCooldownSeconds - 0.5);
-    expect(quiet.screen).toBe("dashboard");
-  });
-
-  it("the random part varies from attack to attack", () => {
-    const waits = [1, 2, 3, 4].map((seed) => {
-      const attacking = updateApp(besideAlertedHunter(), { actions: [], steering: 0 }, DT, config, () => seed);
-      const back = runWhile(attacking, "defence", 30, seed);
-      return back.dashboard.hunterReadyAt[hunterIndex] - back.dashboard.time;
-    });
-    expect(new Set(waits.map((w) => w.toFixed(3))).size).toBeGreaterThan(1);
-  });
-});
-
 describe("first attack after an alert", () => {
   it("a scan that alerts a hunter in range does not bring an attack at once, but soon after", () => {
     // On the Scan verb, standing on the hunter's post.
@@ -69,7 +41,7 @@ describe("first attack after an alert", () => {
     expect(later.screen).toBe("defence");
   });
 
-  it("scanning again does not shorten a hunter's cooldown", () => {
+  it("scanning again does not shorten a wait already set", () => {
     const cooling: DashboardState = {
       ...createDashboardState(config),
       col: 1,
