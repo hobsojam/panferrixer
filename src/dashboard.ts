@@ -401,13 +401,28 @@ export function investigateOutage(s: DashboardState, station: Target, world: Wor
   return { ...s, investigating: { ...s.investigating, [index]: { ...beside[0], until: null } } };
 }
 
-/** A scan's ring alerts every living hunter it reaches. Alerted hunters stay alerted until they engage. */
+/**
+ * The chance that a scan wakes a hunter this far away (design-notes 4.10): certain within the
+ * scan's close zone, then falling steadily to nothing at the edge of the ring.
+ */
+export function scanWakeChance(distance: number, world: World): number {
+  if (distance <= world.blipRadius) return 1;
+  if (distance >= world.directionRadius) return 0;
+  return (world.directionRadius - distance) / (world.directionRadius - world.blipRadius);
+}
+
+/**
+ * The hunters a scan wakes, added to those already alerted. Each living hunter in reach rolls
+ * against its chance once per scan, reproducibly from the clock and the hunter, so scanning
+ * again rolls again. Alerted hunters stay alerted until they engage.
+ */
 export function alertHunters(s: DashboardState, world: World): number[] {
   const found = new Set(s.alerted);
   world.targets.forEach((t, index) => {
     if (t.kind !== "hunter" || s.ruins.includes(index)) return;
     const p = positionOf(s, index, world);
-    if (distanceTo(s.pos, p.x, p.y) <= world.directionRadius) found.add(index);
+    const chance = scanWakeChance(distanceTo(s.pos, p.x, p.y), world);
+    if (chance >= 1 || (chance > 0 && createRng(Math.floor(s.time * 1000) * 131 + index * 7 + 3)() < chance)) found.add(index);
   });
   return [...found];
 }

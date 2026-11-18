@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { createAppState, updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
 import {
+  alertHunters,
   createDashboardState,
   investigateOutage,
   moveHunters,
   positionOf,
+  scanWakeChance,
   startPosition,
   stepDashboard,
   worldFor,
@@ -138,5 +140,46 @@ describe("an alerted hunter holds at its preferred range", () => {
     const robot = { x: post.x + 2, y: post.y };
     const s = run({ ...createDashboardState(config), pos: robot, alerted: [hunterIndex] }, 3);
     expect(positionOf(s, hunterIndex, world)).toEqual(post);
+  });
+});
+
+describe("a scan wakes hunters by chance, falling with range", () => {
+  const close = config.dashboard.blipRadius;
+  const edge = config.dashboard.directionRadius;
+
+  it("certain within the close zone, nothing beyond the ring, falling steadily between", () => {
+    expect(scanWakeChance(0, world)).toBe(1);
+    expect(scanWakeChance(close, world)).toBe(1);
+    expect(scanWakeChance(edge, world)).toBe(0);
+    expect(scanWakeChance(edge + 3, world)).toBe(0);
+    expect(scanWakeChance(8, world)).toBeCloseTo(2 / 3);
+    expect(scanWakeChance(10, world)).toBeCloseTo(1 / 3);
+  });
+
+  /** How often a scan at this many cells from the hunter wakes it, over many scan times. */
+  function wakeRate(distance: number): number {
+    let woken = 0;
+    const scans = 600;
+    for (let i = 0; i < scans; i++) {
+      const s = { ...createDashboardState(config), time: i * 0.37, pos: { x: post.x + distance, y: post.y } };
+      if (alertHunters(s, world).includes(hunterIndex)) woken++;
+    }
+    return woken / scans;
+  }
+
+  it("wakes far hunters about as often as their chance says", () => {
+    expect(wakeRate(close - 1)).toBe(1);
+    expect(wakeRate(8)).toBeGreaterThan(0.55);
+    expect(wakeRate(8)).toBeLessThan(0.78);
+    expect(wakeRate(10)).toBeGreaterThan(0.23);
+    expect(wakeRate(10)).toBeLessThan(0.44);
+    expect(wakeRate(edge + 1)).toBe(0);
+  });
+
+  it("the same scan gives the same answer, and scanning again rolls again", () => {
+    const at = (time: number) => ({ ...createDashboardState(config), time, pos: { x: post.x + 10, y: post.y } });
+    expect(alertHunters(at(4.2), world)).toEqual(alertHunters(at(4.2), world));
+    const outcomes = new Set(Array.from({ length: 40 }, (_, i) => alertHunters(at(i * 0.5), world).includes(hunterIndex)));
+    expect(outcomes.size).toBe(2);
   });
 });
