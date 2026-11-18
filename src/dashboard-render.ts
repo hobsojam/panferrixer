@@ -195,10 +195,10 @@ function drawSelectedReadout(ctx: CanvasRenderingContext2D, state: DashboardStat
 function drawGridReadout(ctx: CanvasRenderingContext2D, state: DashboardState, cfg: Config, x: number): void {
   const c = cfg.colors;
   const ready = gridDisableReady(state);
-  const cooling = Math.ceil(state.gridReadyAt - state.time);
+  const charging = Math.ceil(state.gridReadyAt - state.time);
   drawText(ctx, "SELECTED", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
   drawText(ctx, VERB_LABELS.gridDisable, x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
-  drawText(ctx, ready ? "READY" : `COOLING DOWN ${cooling}`, x + 14, PANEL_TOP + 204, 13, ready ? c.energy : c.panelDim, 1, "monospace", "left");
+  drawText(ctx, ready ? "READY" : `CHARGING ${charging}`, x + 14, PANEL_TOP + 204, 13, ready ? c.energy : c.panelDim, 1, "monospace", "left");
   if (isSuppressed(state, state.location)) {
     const down = Math.ceil((state.suppressedUntil[state.location] ?? 0) - state.time);
     drawText(ctx, `NETWORK POWER DOWN ${down}`, x + 14, PANEL_TOP + 222, 12, c.shield, 1, "monospace", "left");
