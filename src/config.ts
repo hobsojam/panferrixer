@@ -98,9 +98,25 @@ export const config = {
     volleyGapSeconds: 2.8, // time between volley starts
     missileSpacingSeconds: 0.15, // between missiles in one volley
     missileTravelSeconds: 2.2, // from launch to arrival
-    laneMax: 0.9, // lateral spread of the incoming missiles, as a fraction of the robot's range
-    tracerToleranceLateral: 0.1, // how close the robot must be to a missile lane for a tracer to hit it
-    tracerCooldownSeconds: 0.25,
+    // The turret (design-notes 4.8): the view turns within a limited forward arc. Widen the
+    // arc toward free aiming, narrow it toward fixed. The view starts facing the launcher.
+    arcYawDegrees: 45, // the view can turn this far left or right of the launcher
+    arcPitchUpDegrees: 25, // this far up
+    arcPitchDownDegrees: 5, // and only this far below the horizon: nothing comes from the ground
+    viewYawDegrees: 28, // half the visible field across; missiles beyond it are off screen
+    // A strike from a single enemy: every missile leaves one launcher on the horizon, straight
+    // ahead, and fans out as it closes, arriving from somewhere across the sky.
+    launcherPitchDegrees: 0.5, // the launcher sits just on the horizon
+    launchDistance: 1.5, // where missiles start; beyond the guns' range, so the launcher cannot be camped
+    gunRange: 1, // a round with no hit is spent at this distance
+    fanYawDegrees: 34, // how far left or right of the launcher a missile can arrive
+    fanPitchMinDegrees: 3, // arrival height range above the horizon: missiles come from the sky
+    fanPitchMaxDegrees: 16,
+    turnRateDegreesPerSecond: 80, // the difficulty dial: caps keys and mouse alike
+    shotSpeed: 1.6, // distance per second, in the same units as gunRange and launchDistance
+    fireIntervalSeconds: 0.12, // rate of fire while fire is held
+    hitToleranceDegrees: 3.5, // how close to a missile's bearing a round must pass to destroy it
+    mouseDegreesPerPixel: 0.12, // mouse sensitivity while the pointer is captured; still capped by the turn rate
   },
 
   terminalPhase: {

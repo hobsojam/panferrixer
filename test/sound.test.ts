@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AppState } from "../src/app";
 import { config } from "../src/config";
 import { createDashboardState, stepDashboard, worldFor, type Action, type DashboardState } from "../src/dashboard";
+import { createDefence, stepDefence, type DefenceState } from "../src/defence";
 import { createInitialState } from "../src/flight";
 import { eventsBetween } from "../src/sound";
 
@@ -93,5 +94,40 @@ describe("flight sounds", () => {
 
   it("no sound when the phase does not change", () => {
     expect(eventsBetween(flying("flight"), flying("flight"), config)).toEqual([]);
+  });
+});
+
+describe("defence sounds", () => {
+  const dashboard = createDashboardState(config);
+  const defence = (d: DefenceState): AppState => ({ screen: "defence", dashboard, defence: d });
+  const base = createDefence(4, config);
+
+  it("the alarm sounds as an attack takes the screen", () => {
+    expect(eventsBetween(dash(dashboard), defence(base), config)).toEqual(["incoming"]);
+  });
+
+  it("each round fired makes a gun sound", () => {
+    const fired = stepDefence(base, { yaw: 0, pitch: 0 }, true, DT, config);
+    expect(eventsBetween(defence(base), defence(fired), config)).toEqual(["gun"]);
+  });
+
+  it("a missile shot down and a missile getting through each have a sound", () => {
+    const [m] = base.missiles;
+    const shot = { ...base, missiles: [{ ...m, state: "shot" as const }, ...base.missiles.slice(1)] };
+    const hit = { ...base, missiles: [{ ...m, state: "hit" as const }, ...base.missiles.slice(1)] };
+    expect(eventsBetween(defence(base), defence(shot), config)).toEqual(["missileDown"]);
+    expect(eventsBetween(defence(base), defence(hit), config)).toEqual(["missileHit"]);
+  });
+
+  it("each missile leaving the launcher thumps", () => {
+    const first = base.missiles[0].spawn;
+    const before = { ...base, elapsed: first - DT / 2 };
+    const after = stepDefence(before, { yaw: 0, pitch: 0 }, false, DT, config);
+    expect(eventsBetween(defence(before), defence(after), config)).toEqual(["missileLaunch"]);
+  });
+
+  it("an attack in progress with nothing happening is silent", () => {
+    const next = stepDefence(base, { yaw: 0, pitch: 0 }, false, DT, config);
+    expect(eventsBetween(defence(base), defence(next), config)).toEqual([]);
   });
 });

@@ -1,6 +1,7 @@
 import type { Config } from "./config";
 import type { AppState } from "./app";
 import { isLow, type DashboardState } from "./dashboard";
+import type { DefenceState } from "./defence";
 import type { FlightState } from "./types";
 
 /** Every sound the game can make. Which ones play is decided by eventsBetween, which is pure. */
@@ -19,13 +20,21 @@ export type SoundEvent =
   | "hit"
   | "deflect"
   | "crash"
-  | "miss";
+  | "miss"
+  | "incoming"
+  | "gun"
+  | "missileDown"
+  | "missileHit"
+  | "missileLaunch";
 
 /** The sounds that a change between two app states should make. Pure, so it can be tested. */
 export function eventsBetween(prev: AppState, next: AppState, cfg: Config): SoundEvent[] {
   if (prev.screen === "dashboard" && next.screen === "flight") return ["launch"];
   if (prev.screen === "dashboard" && next.screen === "dashboard") return dashboardEvents(prev.dashboard, next.dashboard, cfg);
   if (prev.screen === "flight" && next.screen === "flight") return flightEvents(prev.flight, next.flight, next.shielded);
+  // The warning beat (design-notes 4.8): a sensor alarm as the attack takes the screen.
+  if (prev.screen === "dashboard" && next.screen === "defence") return ["incoming"];
+  if (prev.screen === "defence" && next.screen === "defence") return defenceEvents(prev.defence, next.defence);
   return [];
 }
 
@@ -51,6 +60,18 @@ function dashboardEvents(prev: DashboardState, next: DashboardState, cfg: Config
   const low = isLow(next.energyCells, cfg) || isLow(next.shieldPlates, cfg);
   if (!wasLow && low) events.push("warning");
 
+  return events;
+}
+
+function defenceEvents(prev: DefenceState, next: DefenceState): SoundEvent[] {
+  const events: SoundEvent[] = [];
+  // Each missile leaving the launcher thumps, so the player hears every volley ripple out.
+  const launched = (s: DefenceState) => s.missiles.filter((m) => m.spawn <= s.elapsed).length;
+  if (launched(next) > launched(prev)) events.push("missileLaunch");
+  if (next.shots.length > prev.shots.length) events.push("gun");
+  const count = (s: DefenceState, state: "shot" | "hit") => s.missiles.filter((m) => m.state === state).length;
+  if (count(next, "shot") > count(prev, "shot")) events.push("missileDown");
+  if (count(next, "hit") > count(prev, "hit")) events.push("missileHit");
   return events;
 }
 
@@ -160,6 +181,28 @@ function noise(
 }
 
 const PLAY: Record<SoundEvent, Player> = {
+  // A two-tone sensor alarm, repeated: the robot's survival reflex taking over.
+  incoming: (c, t) => {
+    for (let i = 0; i < 3; i++) {
+      tone(c, t + i * 0.3, 1100, 0.12, "square", 0.08);
+      tone(c, t + i * 0.3 + 0.13, 820, 0.12, "square", 0.08);
+    }
+  },
+  // A distant launch: a low, muffled thump.
+  missileLaunch: (c, t) => {
+    noise(c, t, 0.18, 0.4, "lowpass", 500, 90);
+    tone(c, t, 90, 0.2, "sine", 0.35, 45);
+  },
+  // Kept short and quiet: it plays at the guns' rate of fire.
+  gun: (c, t) => noise(c, t, 0.04, 0.12, "highpass", 3000, 1500),
+  missileDown: (c, t) => {
+    noise(c, t, 0.25, 0.35, "bandpass", 1800, 300);
+    tone(c, t, 700, 0.15, "triangle", 0.12, 200);
+  },
+  missileHit: (c, t) => {
+    noise(c, t, 0.5, 0.6, "lowpass", 1200, 80);
+    tone(c, t, 120, 0.4, "sine", 0.5, 40);
+  },
   select: (c, t) => tone(c, t, 1400, 0.03, "square", 0.04),
   confirm: (c, t) => {
     tone(c, t, 660, 0.07, "sine", 0.2);

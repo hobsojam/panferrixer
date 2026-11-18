@@ -14,7 +14,7 @@ import {
   type Action,
   type DashboardState,
 } from "./dashboard";
-import { createDefence, hitCount, stepDefence, type DefenceState } from "./defence";
+import { createDefence, hitCount, stepDefence, type Aim, type DefenceState } from "./defence";
 import { createInitialState, updateFlight } from "./flight";
 import type { Target } from "./local-map";
 import type { FlightState } from "./types";
@@ -32,6 +32,8 @@ export type AppState =
 export interface AppInput {
   actions: readonly Action[]; // discrete presses this step; ignored during flight
   steering: number; // held left/right, -1..1
+  aim?: Aim; // held turning on both axes, -1..1 each; the defence turret. Missing means no turning
+  fire?: boolean; // fire held; the defence guns. Missing means not firing
 }
 
 export function createAppState(cfg: Config): AppState {
@@ -82,7 +84,9 @@ export function updateApp(
   if (state.screen === "defence") {
     // The shield clock and the hunters run during an attack, as they do during a flight.
     const timed = moveHunters({ ...state.dashboard, time: state.dashboard.time + dt }, world, dt);
-    const defence = stepDefence(state.defence, input.steering, input.actions.includes("activate"), dt, cfg);
+    // A fresh press fires as well as holding, so a quick tap is never lost between steps.
+    const fire = (input.fire ?? false) || input.actions.includes("activate");
+    const defence = stepDefence(state.defence, input.aim ?? { yaw: 0, pitch: 0 }, fire, dt, cfg);
     if (!defence.done) return { screen: "defence", dashboard: timed, defence };
     // The attack is over: every missile that got through is a hit on the shields.
     const hit = applyShieldHits(timed, hitCount(defence), cfg.dashboard.hitsPerPlate);
