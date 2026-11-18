@@ -2,15 +2,26 @@ import { describe, expect, it } from "vitest";
 import { updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
 import { alertHunters, applyShieldHits, createDashboardState, hunterInRange, isShielded, networkOf, stepDashboard, worldFor, type DashboardState } from "../src/dashboard";
-import { createDefence, hitCount, stepDefence, type DefenceState } from "../src/defence";
+import { createDefence, hitCount, isWarning, missileDistance, stepDefence, type DefenceState, type Missile } from "../src/defence";
 
 const DT = 1 / 60;
 const world = worldFor(config);
 
-function run(s: DefenceState, steps: number, fire: (i: number) => boolean = () => false, steer = 0): DefenceState {
+const STILL = { yaw: 0, pitch: 0 };
+
+function run(s: DefenceState, steps: number, fire: (i: number) => boolean = () => false): DefenceState {
   let state = s;
-  for (let i = 0; i < steps && !state.done; i++) state = stepDefence(state, steer, fire(i), DT, config);
+  for (let i = 0; i < steps && !state.done; i++) state = stepDefence(state, STILL, fire(i), DT, config);
   return state;
+}
+
+/** A single missile on the given bearing, appearing at `spawn` and arriving after the usual travel time. */
+function oneMissile(yaw: number, pitch: number, spawn = 0): Missile {
+  return { spawn, arrive: spawn + config.defence.missileTravelSeconds, yaw, pitch, state: "flying", resolvedAt: null };
+}
+
+function withMissiles(missiles: Missile[], view = { yaw: 0, pitch: 0 }): DefenceState {
+  return { ...createDefence(3, config), ...view, missiles };
 }
 
 describe("missile schedule", () => {
@@ -23,6 +34,21 @@ describe("missile schedule", () => {
     }
   });
 
+  it("every missile comes from inside the turret's arc", () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      for (const m of createDefence(seed, config).missiles) {
+        expect(Math.abs(m.yaw)).toBeLessThanOrEqual(config.defence.arcYawDegrees);
+        expect(Math.abs(m.pitch)).toBeLessThanOrEqual(config.defence.arcPitchDegrees);
+      }
+    }
+  });
+
+  it("nothing appears during the warning beat", () => {
+    const d = createDefence(7, config);
+    expect(isWarning(d, config)).toBe(true);
+    for (const m of d.missiles) expect(m.spawn).toBeGreaterThanOrEqual(config.defence.warningSeconds);
+  });
+
   it("each missile takes the same travel time, and the attack ends after the last one arrives", () => {
     const d = createDefence(7, config);
     for (const m of d.missiles) expect(m.arrive - m.spawn).toBeCloseTo(config.defence.missileTravelSeconds);
@@ -32,34 +58,103 @@ describe("missile schedule", () => {
   });
 });
 
-describe("tracers", () => {
-  it("a tracer in a missile's lane shoots it down", () => {
-    const base = createDefence(3, config);
-    const s: DefenceState = {
-      ...base,
-      x: 0.5,
-      missiles: [{ spawn: 0, arrive: 5, lane: 0.5, state: "flying" }],
-    };
-    const shot = stepDefence(s, 0, true, DT, config);
-    expect(shot.missiles[0].state).toBe("shot");
+describe("turning", () => {
+  it("the view turns at the turn rate on both axes", () => {
+    const s = stepDefence(withMissiles([oneMissile(0, 0)]), { yaw: 1, pitch: -1 }, false, 0.1, config);
+    expect(s.yaw).toBeCloseTo(config.defence.turnRateDegreesPerSecond * 0.1);
+    expect(s.pitch).toBeCloseTo(-config.defence.turnRateDegreesPerSecond * 0.1);
   });
 
-  it("a tracer out of the missile's lane misses", () => {
-    const base = createDefence(3, config);
-    const s: DefenceState = { ...base, x: -0.5, missiles: [{ spawn: 0, arrive: 5, lane: 0.5, state: "flying" }] };
-    expect(stepDefence(s, 0, true, DT, config).missiles[0].state).toBe("flying");
+  it("input beyond full deflection is capped, so the mouse cannot out-turn the keys", () => {
+    const s = stepDefence(withMissiles([oneMissile(0, 0)]), { yaw: 50, pitch: 0 }, false, 0.1, config);
+    expect(s.yaw).toBeCloseTo(config.defence.turnRateDegreesPerSecond * 0.1);
   });
 
-  it("tracers are limited by a cooldown", () => {
-    const base = createDefence(3, config);
-    const s: DefenceState = { ...base, elapsed: 1, lastShot: 1, x: 0, missiles: [{ spawn: 0, arrive: 5, lane: 0, state: "flying" }] };
-    const again = stepDefence(s, 0, true, DT, config);
-    expect(again.missiles[0].state).toBe("flying");
+  it("the view stops at the edge of the arc", () => {
+    let s = withMissiles([oneMissile(0, 0, 100)]);
+    for (let i = 0; i < 600; i++) s = stepDefence(s, { yaw: -1, pitch: 1 }, false, DT, config);
+    expect(s.yaw).toBe(-config.defence.arcYawDegrees);
+    expect(s.pitch).toBe(config.defence.arcPitchDegrees);
+  });
+});
+
+describe("the guns", () => {
+  it("a round on a missile's bearing destroys it, but only once it has flown out to it", () => {
+    let s = stepDefence(withMissiles([oneMissile(10, 5)], { yaw: 10, pitch: 5 }), STILL, true, DT, config);
+    expect(s.missiles[0].state).toBe("flying");
+    for (let i = 0; i < 60 && s.missiles[0].state === "flying"; i++) s = stepDefence(s, STILL, false, DT, config);
+    expect(s.missiles[0].state).toBe("shot");
+    expect(s.missiles[0].resolvedAt).not.toBeNull();
+    expect(s.shots[0].state).toBe("spent");
+  });
+
+  it("a round off the missile's bearing misses", () => {
+    const s = run(withMissiles([oneMissile(10, 5)], { yaw: -10, pitch: 5 }), 400, (i) => i === 0);
+    expect(s.missiles[0].state).toBe("hit");
+  });
+
+  it("a round keeps its bearing when the view turns after firing", () => {
+    let s = stepDefence(withMissiles([oneMissile(0, 0)]), STILL, true, DT, config);
+    for (let i = 0; i < 60 && s.missiles[0].state === "flying"; i++) s = stepDefence(s, { yaw: 1, pitch: 0 }, false, DT, config);
+    expect(s.missiles[0].state).toBe("shot");
+  });
+
+  it("holding fire is limited by the rate of fire", () => {
+    const s = run(withMissiles([oneMissile(0, 0, 100)]), 60, () => true);
+    const expected = Math.floor(1 / config.defence.fireIntervalSeconds) + 1;
+    expect(s.shots.length).toBeGreaterThanOrEqual(expected - 1);
+    expect(s.shots.length).toBeLessThanOrEqual(expected);
+  });
+
+  it("a round takes the nearest of two missiles on its bearing", () => {
+    const far = oneMissile(0, 0, 0);
+    const near = oneMissile(0, 0, -1); // appeared a second earlier, so it is closer
+    let s = stepDefence(withMissiles([far, near]), STILL, true, DT, config);
+    for (let i = 0; i < 60 && s.shots[0].state === "flying"; i++) s = stepDefence(s, STILL, false, DT, config);
+    expect(s.missiles[1].state).toBe("shot");
+    expect(s.missiles[0].state).toBe("flying");
+  });
+
+  it("a round that reaches the guns' range without a hit is spent", () => {
+    const s = run(withMissiles([oneMissile(30, 0, 100)]), Math.ceil(1.2 / config.defence.shotSpeed / DT), (i) => i === 0);
+    expect(s.shots[0].state).toBe("spent");
   });
 
   it("a missile that is not shot down arrives as a hit", () => {
     const d = run(createDefence(9, config), 60 * 20);
     expect(hitCount(d)).toBe(d.missiles.length);
+  });
+});
+
+describe("balance", () => {
+  // A simple competent gunner: turn toward the nearest missile, fire when lined up.
+  function gunner(s: DefenceState): { aim: { yaw: number; pitch: number }; fire: boolean } {
+    const live = s.missiles.filter((m) => m.state === "flying" && m.spawn <= s.elapsed);
+    if (live.length === 0) return { aim: STILL, fire: false };
+    const target = live.reduce((a, b) => (missileDistance(a, s.elapsed) < missileDistance(b, s.elapsed) ? a : b));
+    const step = config.defence.turnRateDegreesPerSecond * DT;
+    const aim = {
+      yaw: Math.max(-1, Math.min(1, (target.yaw - s.yaw) / step)),
+      pitch: Math.max(-1, Math.min(1, (target.pitch - s.pitch) / step)),
+    };
+    return { aim, fire: Math.hypot(target.yaw - s.yaw, target.pitch - s.pitch) <= config.defence.hitToleranceDegrees };
+  }
+
+  it("a competent gunner shoots down most missiles, but not every one every time", () => {
+    let shot = 0;
+    let total = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      let s = createDefence(seed, config);
+      for (let i = 0; i < 60 * 30 && !s.done; i++) {
+        const g = gunner(s);
+        s = stepDefence(s, g.aim, g.fire, DT, config);
+      }
+      shot += s.missiles.filter((m) => m.state === "shot").length;
+      total += s.missiles.length;
+    }
+    // design-notes 4.9 assumes about half shot down for an average player; a tireless bot should do better.
+    expect(shot / total).toBeGreaterThan(0.6);
+    expect(shot / total).toBeLessThan(1);
   });
 });
 

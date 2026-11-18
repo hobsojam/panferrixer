@@ -12,12 +12,15 @@ const ACTION_KEYS: Record<string, Action> = {
 
 /**
  * Keyboard only. Two kinds of input:
- * - held left/right, the steering axis used in flight
+ * - held keys: left/right steer in flight; all four arrows turn the defence turret, and Space fires its guns
  * - discrete presses, queued as actions for the dashboard and result screens
  */
 export class InputController {
   private leftDown = false;
   private rightDown = false;
+  private upDown = false;
+  private downDown = false;
+  private fireDown = false;
   private queued: Action[] = [];
   private muteQueued = false;
 
@@ -28,6 +31,16 @@ export class InputController {
 
   getSteering(): number {
     return (this.rightDown ? 1 : 0) - (this.leftDown ? 1 : 0);
+  }
+
+  /** The defence turret's turning: right and up are positive. */
+  getAim(): { yaw: number; pitch: number } {
+    return { yaw: this.getSteering(), pitch: (this.upDown ? 1 : 0) - (this.downDown ? 1 : 0) };
+  }
+
+  /** True while the fire key is held: the defence guns fire at their rate of fire. */
+  isFireHeld(): boolean {
+    return this.fireDown;
   }
 
   /** Returns and clears the presses made since the last call, in order. */
@@ -52,6 +65,9 @@ export class InputController {
   private onKeyDown = (e: KeyboardEvent): void => {
     if (e.code === "ArrowLeft") this.leftDown = true;
     if (e.code === "ArrowRight") this.rightDown = true;
+    if (e.code === "ArrowUp") this.upDown = true;
+    if (e.code === "ArrowDown") this.downDown = true;
+    if (e.code === "Space") this.fireDown = true;
 
     // Holding a key should not spam the dashboard; only fresh presses count.
     if (e.code === "KeyM" && !e.repeat) this.muteQueued = true;
@@ -62,5 +78,8 @@ export class InputController {
   private onKeyUp = (e: KeyboardEvent): void => {
     if (e.code === "ArrowLeft") this.leftDown = false;
     if (e.code === "ArrowRight") this.rightDown = false;
+    if (e.code === "ArrowUp") this.upDown = false;
+    if (e.code === "ArrowDown") this.downDown = false;
+    if (e.code === "Space") this.fireDown = false;
   };
 }

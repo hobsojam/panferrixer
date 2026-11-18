@@ -36,7 +36,7 @@ function frame(now: number): void {
 
   while (accumulator >= fixedDt) {
     const before = state;
-    state = updateApp(state, { actions: pending, steering: input.getSteering() }, fixedDt, config, newSeed);
+    state = updateApp(state, { actions: pending, steering: input.getSteering(), aim: input.getAim(), fire: input.isFireHeld() }, fixedDt, config, newSeed);
     for (const event of eventsBetween(before, state, config)) sound.play(event);
     pending = [];
     accumulator -= fixedDt;
