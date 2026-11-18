@@ -47,6 +47,22 @@ function isResult(phase: FlightState["phase"]): boolean {
   return phase === "hit" || phase === "crash" || phase === "miss";
 }
 
+/** The shields as shown during an attack: plates standing, and hits taken on the top one. */
+export interface ShieldView {
+  plates: number;
+  hitsOnTop: number;
+}
+
+/**
+ * The shields as they stand mid-attack: the dashboard's, less every hit taken so far. Shown
+ * live, so each hit is felt when it lands; the same hits are applied to the dashboard once,
+ * when the attack ends, so nothing is counted twice.
+ */
+export function shieldsDuringAttack(dashboard: DashboardState, defence: DefenceState, cfg: Config): ShieldView {
+  const after = applyShieldHits(dashboard, hitCount(defence), cfg.dashboard.hitsPerPlate);
+  return { plates: after.shieldPlates, hitsOnTop: after.shieldHits };
+}
+
 /** How far the robot is from a target, in map cells. A hunter may have moved from its post. */
 function rangeTo(dashboard: DashboardState, index: number, world: World): number {
   const p = positionOf(dashboard, index, world);

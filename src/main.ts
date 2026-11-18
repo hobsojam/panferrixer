@@ -1,4 +1,4 @@
-import { createAppState, updateApp, type AppState } from "./app";
+import { createAppState, shieldsDuringAttack, updateApp, type AppState } from "./app";
 import { config } from "./config";
 import type { Action } from "./dashboard";
 import { renderDashboard } from "./dashboard-render";
@@ -64,7 +64,7 @@ function frame(now: number): void {
   if (state.screen === "dashboard") {
     renderDashboard(ctx!, state.dashboard, config, !sound.isMuted());
   } else if (state.screen === "defence") {
-    renderDefence(ctx!, state.defence, state.dashboard.shieldPlates, config, input.isPointerLocked());
+    renderDefence(ctx!, state.defence, shieldsDuringAttack(state.dashboard, state.defence, config), config, input.isPointerLocked());
   } else {
     render(ctx!, state.flight, config, state.target.kind, state.shielded);
   }

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { updateApp, type AppState } from "../src/app";
+import { shieldsDuringAttack, updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
 import { createDashboardState, isShielded, isSuppressed, networkOf, worldFor, type DashboardState } from "../src/dashboard";
+import { createDefence } from "../src/defence";
 import { createInitialState } from "../src/flight";
 import type { Target } from "../src/local-map";
 
@@ -126,5 +127,42 @@ describe("overlapping towns", () => {
       const otherDown = { ...createDashboardState(config), suppressedUntil: { [own + 1]: 1000 } };
       expect(isShielded(otherDown, building)).toBe(true);
     }
+  });
+});
+
+describe("shields during an attack (design-notes 4.9)", () => {
+  const DT = 1 / 60;
+  const world = worldFor(config);
+  const hunterIndex = world.targets.findIndex((t) => t.kind === "hunter");
+  const hunter = world.targets[hunterIndex];
+
+  it("shows the dashboard's shields before any hit", () => {
+    const dashboard = { ...createDashboardState(config), shieldPlates: 5, shieldHits: 1 };
+    expect(shieldsDuringAttack(dashboard, createDefence(3, config), config)).toEqual({ plates: 5, hitsOnTop: 1 });
+  });
+
+  it("each hit shows as it lands: the top plate cracks, then breaks", () => {
+    const dashboard = createDashboardState(config);
+    const defence = createDefence(3, config);
+    const withHits = (n: number) => ({
+      ...defence,
+      missiles: defence.missiles.map((m, i) => (i < n ? { ...m, state: "hit" as const, resolvedAt: 1 } : m)),
+    });
+    const full = config.dashboard.shieldPlates;
+    expect(shieldsDuringAttack(dashboard, withHits(1), config)).toEqual({ plates: full, hitsOnTop: 1 });
+    expect(shieldsDuringAttack(dashboard, withHits(2), config)).toEqual({ plates: full, hitsOnTop: 2 });
+    expect(shieldsDuringAttack(dashboard, withHits(config.dashboard.hitsPerPlate), config)).toEqual({ plates: full - 1, hitsOnTop: 0 });
+  });
+
+  it("the dashboard ends the attack with exactly what was shown, so no hit counts twice", () => {
+    let s: AppState = { screen: "dashboard", dashboard: { ...createDashboardState(config), pos: { x: hunter.col, y: hunter.row }, alerted: [hunterIndex] } };
+    s = updateApp(s, { actions: [], steering: 0 }, DT, config, () => 5);
+    let shown = { plates: -1, hitsOnTop: -1 };
+    for (let i = 0; i < 60 * 30 && s.screen === "defence"; i++) {
+      shown = shieldsDuringAttack(s.dashboard, s.defence, config);
+      s = updateApp(s, { actions: [], steering: 0 }, DT, config, () => 5);
+    }
+    if (s.screen !== "dashboard") throw new Error("expected the dashboard");
+    expect({ plates: s.dashboard.shieldPlates, hitsOnTop: s.dashboard.shieldHits }).toEqual(shown);
   });
 });

@@ -2,6 +2,7 @@ import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
 import { AVAILABLE_VERBS, VERB_GRID, buildingCells, gridDisableReady, isInsideBuilding, isLow, isSuppressed, positionOf, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
+import { drawCracks, tracePlate } from "./plates";
 import { drawGlow } from "./render";
 import { cellKey } from "./route";
 
@@ -34,7 +35,7 @@ export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardS
   drawVerbGrid(ctx, state, cfg);
   drawSidePanel(ctx, state, world, cfg);
   drawGauge(ctx, "ENERGY", state.energyCells, cfg.dashboard.energyCells, 330, cfg, "cell", state.time);
-  drawGauge(ctx, "SHIELDS", state.shieldPlates, cfg.dashboard.shieldPlates, 384, cfg, "plate", state.time);
+  drawGauge(ctx, "SHIELDS", state.shieldPlates, cfg.dashboard.shieldPlates, 384, cfg, "plate", state.time, state.shieldHits);
 
   drawText(ctx, hintFor(state, soundOn), w / 2, h - 28, 14, c.text, 0.8, "monospace");
 
@@ -528,7 +529,8 @@ function drawGauge(
   y: number,
   cfg: Config,
   shape: "cell" | "plate",
-  time: number
+  time: number,
+  hitsOnTop = 0 // plates only: hits the top plate has taken, shown as cracks
 ): void {
   const c = cfg.colors;
   const color = shape === "cell" ? c.energy : c.shield;
@@ -557,21 +559,17 @@ function drawGauge(
     traceUnit(ctx, shape, x, y, unitW, height);
     if (filled) ctx.fill();
     ctx.stroke();
+    if (shape === "plate" && isLastFilled && hitsOnTop > 0) drawCracks(ctx, x, y, unitW, height, hitsOnTop, c.background);
   }
   ctx.globalAlpha = 1;
 }
 
 function traceUnit(ctx: CanvasRenderingContext2D, shape: "cell" | "plate", x: number, y: number, w: number, h: number): void {
-  ctx.beginPath();
   if (shape === "cell") {
+    ctx.beginPath();
     ctx.rect(x, y, w, h);
   } else {
-    const slant = w * 0.12;
-    ctx.moveTo(x + slant, y);
-    ctx.lineTo(x + w, y);
-    ctx.lineTo(x + w - slant, y + h);
-    ctx.lineTo(x, y + h);
-    ctx.closePath();
+    tracePlate(ctx, x, y, w, h);
   }
 }
 
