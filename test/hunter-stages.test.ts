@@ -75,20 +75,32 @@ describe("hunters and buildings (design-notes 4.7)", () => {
   const wall = Array.from({ length: rows }, (_, row) => ({ col: 4, row, kind: "dome" as const, hasDrop: false, network: 0 }));
   const walled: World = {
     ...world,
-    map: mapOf(Array(rows).fill("1".repeat(9))),
+    map: mapOf(Array(rows).fill("1".repeat(15))),
     towns: [],
     targets: [{ col: 2, row: 1, kind: "hunter", hasDrop: false, network: 0 }, ...wall],
   };
-  const chasing: DashboardState = { ...createDashboardState(config), pos: { x: 6, y: 1 }, alerted: [0] };
+  const chasing: DashboardState = { ...createDashboardState(config), pos: { x: 12, y: 1 }, alerted: [0] };
 
   it("the wall blocks the robot", () => {
-    expect(routeTo({ ...chasing, pos: { x: 2, y: 1 } }, { col: 6, row: 1 }, walled)).toBeNull();
+    expect(routeTo({ ...chasing, pos: { x: 2, y: 1 } }, { col: 12, row: 1 }, walled)).toBeNull();
   });
 
-  it("an alerted hunter passes through a building to reach the robot", () => {
+  it("an alerted hunter passes through a building, then holds at its preferred range", () => {
     let s = chasing;
     for (let i = 0; i < 10 / DT; i++) s = moveHunters(s, walled, DT);
-    expect(positionOf(s, 0, walled)).toEqual({ x: 6, y: 1 });
+    const p = positionOf(s, 0, walled);
+    expect(p.x).toBeGreaterThan(4); // through the wall
+    const range = Math.hypot(p.x - 12, p.y - 1);
+    expect(range).toBeLessThanOrEqual(config.dashboard.hunterHoldCells);
+    expect(range).toBeGreaterThan(config.dashboard.hunterHoldCells - 0.5); // it stopped there, not on the robot
+  });
+
+  it("never halts inside a building, even within its preferred range", () => {
+    // From (2, 1) toward a robot at (8, 1), it reaches its range while inside the wall at x = 4.
+    let s: DashboardState = { ...chasing, pos: { x: 8, y: 1 } };
+    for (let i = 0; i < 10 / DT; i++) s = moveHunters(s, walled, DT);
+    expect(isInsideBuilding(s, 0, walled)).toBe(false);
+    expect(positionOf(s, 0, walled).x).toBeGreaterThan(4);
   });
 
   it("is shown as inside the building while it passes through", () => {

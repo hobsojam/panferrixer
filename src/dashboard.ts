@@ -58,6 +58,7 @@ export interface World {
   hunterFirstAttackDelayMin: number; // the wait before a newly alerted hunter's first attack
   hunterFirstAttackDelayMax: number;
   hunterSightCells: number; // a hunter this close to the robot sees it (design-notes 4.10)
+  hunterHoldCells: number; // an alerted hunter closes to this range, then holds
   hunterInvestigateSeconds: number; // how long a hunter searches where it was sent
 }
 
@@ -137,6 +138,7 @@ export function worldFor(cfg: Config): World {
       hunterFirstAttackDelayMin: cfg.dashboard.hunterFirstAttackDelayMin,
       hunterFirstAttackDelayMax: cfg.dashboard.hunterFirstAttackDelayMax,
       hunterSightCells: cfg.dashboard.hunterSightCells,
+      hunterHoldCells: cfg.dashboard.hunterHoldCells,
       hunterInvestigateSeconds: cfg.dashboard.hunterInvestigateSeconds,
     };
   }
@@ -327,8 +329,9 @@ export function alertTo(s: DashboardState, indices: readonly number[], world: Wo
 
 /**
  * Moves the hunters (design-notes 4.10). Every hunter is always looking: one that comes
- * within sight of the robot is alerted, whatever it was doing. An alerted hunter walks
- * toward the robot, and breaks off once the robot is beyond its leash. A hunter sent to
+ * within sight of the robot is alerted, whatever it was doing. An alerted hunter closes
+ * to its preferred range and holds there while it attacks, and breaks off once the robot
+ * is beyond its leash. A hunter sent to
  * investigate walks there, searches for a while, then goes home. Otherwise it walks back
  * to its post. A destroyed hunter does not move.
  */
@@ -347,6 +350,9 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
 
     let goal: Point;
     if (alerted) {
+      // Close to the preferred range, then hold. Never halt inside a building: carry on through it.
+      const inside = buildingCells(next, world).has(cellKey(world.map, Math.round(here.x), Math.round(here.y)));
+      if (distanceTo(next.pos, here.x, here.y) <= world.hunterHoldCells && !inside) return;
       goal = { x: Math.round(next.pos.x), y: Math.round(next.pos.y) };
     } else if (search) {
       if (here.x === search.x && here.y === search.y) {

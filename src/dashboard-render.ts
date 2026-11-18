@@ -320,11 +320,6 @@ function drawLocalMap(
       drawPlaceholderMarker(ctx, tx, ty, color, inRange);
     }
     ctx.globalAlpha = 1;
-    // A hunter's stage (design-notes 4.10): "!" once it has seen the robot, "?" while it searches.
-    const stage = state.alerted.includes(index) ? "!" : state.investigating[index] ? "?" : null;
-    if (t.kind === "hunter" && stage) {
-      drawText(ctx, stage, tx, ty - cellH * 0.9, 13, stage === "!" ? c.alert : c.panelSelected, 1, "monospace", "center");
-    }
   });
 
   if (state.mode !== "browse") {

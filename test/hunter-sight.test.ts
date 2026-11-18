@@ -121,3 +121,22 @@ describe("cutting power sends the hunter to investigate", () => {
     expect(investigateOutage(dead, station, world).investigating).toEqual({});
   });
 });
+
+describe("an alerted hunter holds at its preferred range", () => {
+  it("closes in from further away, then stops at its range instead of running onto the robot", () => {
+    const robot = { x: post.x + config.dashboard.hunterSightCells - 0.5, y: post.y };
+    let s: DashboardState = { ...createDashboardState(config), pos: robot };
+    s = run(s, 8);
+    const p = positionOf(s, hunterIndex, world);
+    const range = Math.hypot(p.x - robot.x, p.y - robot.y);
+    expect(s.alerted).toContain(hunterIndex);
+    expect(range).toBeLessThanOrEqual(config.dashboard.hunterHoldCells);
+    expect(range).toBeGreaterThan(1);
+  });
+
+  it("does not move while the robot is already within its range", () => {
+    const robot = { x: post.x + 2, y: post.y };
+    const s = run({ ...createDashboardState(config), pos: robot, alerted: [hunterIndex] }, 3);
+    expect(positionOf(s, hunterIndex, world)).toEqual(post);
+  });
+});
