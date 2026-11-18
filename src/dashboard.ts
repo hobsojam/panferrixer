@@ -1,7 +1,8 @@
 import type { Config } from "./config";
 import { generateWorld, inTown, townCentres, type LocalMap, type Target, type Town } from "./local-map";
 import { createRng } from "./rng";
-import { cellKey, findRoute, findRouteToAny, isPassable, OFFSETS, type Blocked } from "./route";
+import { canWalk, stepToward } from "./enemy-move";
+import { cellKey, findRoute, findRouteToAny, isPassable, OFFSETS, walkPoint, type Blocked } from "./route";
 
 /** The four verbs from design-notes 4.6. All four work. */
 export type Verb = "move" | "scan" | "missile" | "gridDisable";
@@ -317,28 +318,6 @@ export function routeTo(s: DashboardState, cell: Cross, world: World): Point[] |
   return findRouteToAny(s.pos, beside, world.map, blocked);
 }
 
-/** Walks along a route for up to `distance` cells. Returns where it ends up and the route still to go. */
-export function walkPoint(pos: Point, route: readonly Point[], distance: number): { pos: Point; route: Point[] } {
-  let p = { ...pos };
-  let r = [...route];
-  let budget = distance;
-  while (budget > 0 && r.length > 0) {
-    const next = r[0];
-    const dx = next.x - p.x;
-    const dy = next.y - p.y;
-    const d = Math.hypot(dx, dy);
-    if (d <= budget) {
-      p = { ...next };
-      r = r.slice(1);
-      budget -= d;
-    } else {
-      p = { x: p.x + (dx / d) * budget, y: p.y + (dy / d) * budget };
-      budget = 0;
-    }
-  }
-  return { pos: p, route: r };
-}
-
 /**
  * Hunters that have just noticed the robot become alerted: each waits a moment before its
  * first attack, and drops any search it was on.
@@ -413,14 +392,12 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
       if (here.x === post.x && here.y === post.y) return;
       goal = post;
     }
-    // Enemies may pass through buildings but never stop on one (design-notes 4.7). Every goal
-    // is open ground: the robot cannot stand on a building, a post is never one, and a
-    // search point is a free cell beside a building.
-    const route = findRoute({ x: Math.round(here.x), y: Math.round(here.y) }, goal, world.map);
-    if (route === null) return;
-    const walked = walkPoint(here, route, world.hunterSpeed * dt);
-    // Once the route is used up the hunter is exactly at its goal, not a rounding error short of it.
-    const pos = walked.route.length === 0 ? goal : walked.pos;
+    // Enemies may pass through buildings but never stop on one (design-notes 4.7), and never
+    // cross high ground. Every goal is open ground: the robot cannot stand on a building, a
+    // post is never one, and a search or rearm point is a free cell beside a building that
+    // the hunter can walk to. A goal across high ground is approached as near as the hunter
+    // can get, and tried again on the next step.
+    const pos = stepToward(here, goal, world.map, world.hunterSpeed * dt);
     next = { ...next, hunterPos: { ...next.hunterPos, [index]: pos } };
   });
   return next;
@@ -429,7 +406,8 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
 /**
  * Cutting a power station is noticed at the station, not at the robot (design-notes 4.3):
  * the network's hunter is sent to look, at the free cell beside the station nearest to it.
- * A hunter already chasing the robot ignores the outage.
+ * A hunter already chasing the robot ignores the outage, and so does one that high ground
+ * cuts off from the station.
  */
 export function investigateOutage(s: DashboardState, station: Target, world: World): DashboardState {
   const index = world.targets.findIndex((t) => t.kind === "hunter" && t.network === station.network);
@@ -437,7 +415,7 @@ export function investigateOutage(s: DashboardState, station: Target, world: Wor
   const blocked = buildingCells(s, world);
   const here = positionOf(s, index, world);
   const beside = OFFSETS.map(([dx, dy]) => ({ x: station.col + dx, y: station.row + dy }))
-    .filter((c) => isPassable(world.map, c.x, c.y, blocked))
+    .filter((c) => isPassable(world.map, c.x, c.y, blocked) && canWalk(here, c, world.map))
     .sort((a, b) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(b.x - here.x, b.y - here.y));
   if (beside.length === 0) return s;
   return { ...s, investigating: { ...s.investigating, [index]: { ...beside[0], until: null } } };
@@ -446,7 +424,7 @@ export function investigateOutage(s: DashboardState, station: Target, world: Wor
 /**
  * A hunter has made an attack (design-notes 4.10). It spends one from its magazine; once the
  * magazine is empty it breaks off and withdraws to rearm at a free cell beside the nearest
- * intact dome in its network, or at its post if the network has none.
+ * intact dome in its network that it can walk to, or at its post if there is none.
  */
 export function spendAttack(s: DashboardState, index: number, world: World): DashboardState {
   const used = (s.attacksUsed[index] ?? 0) + 1;
@@ -455,20 +433,24 @@ export function spendAttack(s: DashboardState, index: number, world: World): Das
   return { ...spent, alerted: spent.alerted.filter((i) => i !== index), rearming: { ...spent.rearming, [index]: { ...rearmPoint(spent, index, world), until: null } } };
 }
 
-/** Where a hunter rearms: beside the nearest intact dome in its network, or its post. */
+/**
+ * Where a hunter rearms: beside the nearest intact dome in its network that it can walk to,
+ * or its post. A dome cut off by high ground is passed over.
+ */
 function rearmPoint(s: DashboardState, index: number, world: World): Point {
   const hunter = world.targets[index];
   const here = positionOf(s, index, world);
   const blocked = buildingCells(s, world);
-  const nearest = (cells: Point[]) => cells.sort((a, b) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(b.x - here.x, b.y - here.y))[0];
+  const byDistance = (cells: Point[]) => cells.sort((a, b) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(b.x - here.x, b.y - here.y));
   const domes = world.targets
     .map((t, i) => ({ t, i }))
     .filter(({ t, i }) => t.kind === "dome" && t.network === hunter.network && !s.ruins.includes(i))
     .map(({ t }) => ({ x: t.col, y: t.row }));
-  const dome = nearest(domes);
-  if (dome) {
-    const beside = OFFSETS.map(([dx, dy]) => ({ x: dome.x + dx, y: dome.y + dy })).filter((c) => isPassable(world.map, c.x, c.y, blocked));
-    const spot = nearest(beside);
+  for (const dome of byDistance(domes)) {
+    const beside = OFFSETS.map(([dx, dy]) => ({ x: dome.x + dx, y: dome.y + dy })).filter(
+      (c) => isPassable(world.map, c.x, c.y, blocked) && canWalk(here, c, world.map)
+    );
+    const spot = byDistance(beside)[0];
     if (spot) return spot;
   }
   return { x: hunter.col, y: hunter.row };

@@ -184,8 +184,10 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
       if (map.tiers[row][col] === 0) continue;
       if (targets.some((t) => t.col === col && t.row === row)) continue;
       // Buildings block the robot, so a building may not cut off a town or another building.
-      // The hunter is not a building and may stand anywhere.
+      // The hunter is not a building and may stand anywhere on ground the robot can walk to,
+      // but never on high ground, which blocks enemies too.
       const isHunter = placed === 1;
+      if (isHunter && !reachableFrom(towns[0], map).has(cellKey(map, col, row))) continue;
       if (!isHunter && !keepsRoutesOpen(map, towns, [...targets.filter((t) => t.kind !== "hunter"), { col, row }])) continue;
       // Each network has one power station, placed first. It is never a drop: it cannot be destroyed.
       // The hunter, placed second, is the network's one enemy. It has no drop.
