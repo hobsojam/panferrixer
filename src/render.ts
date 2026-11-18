@@ -1,5 +1,5 @@
 import type { Config } from "./config";
-import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
+import { ART, hasArt, strokeArt } from "./building-art";
 import { drawDust, drawExplosion } from "./explosion";
 import type { TargetKind } from "./local-map";
 import { terminalStart } from "./terrain";
@@ -190,14 +190,14 @@ function drawTarget(
   }
 
   if (kind && hasArt(kind)) {
-    // Terminal phase: the chosen building is drawn in full detail, standing on the ground (base at the horizon).
+    // Terminal phase: the chosen building or enemy is drawn in full detail, standing on the ground (base at the horizon).
     // On an unshielded hit it shakes and fades while the blast runs, so it reads as collapsing.
     const hit = collapsing ? state.resultElapsed : null;
     const fade = hit === null ? 1 : clamp(1 - hit / 0.8, 0, 1);
     const shake = hit === null || hit > 0.3 ? 0 : Math.sin(hit * 80) * size * 0.02;
     ctx.save();
     ctx.globalAlpha = fade;
-    strokeArt(ctx, BUILDING_ART[kind]!.full, centerX + shake, horizonY, size / 2, cfg.colors.target, 2, 8);
+    strokeArt(ctx, ART[kind].full, centerX + shake, horizonY, size / 2, cfg.colors.target, 2, 8);
     ctx.restore();
     return;
   }

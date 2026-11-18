@@ -1,18 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { BUILDING_ART, hasArt } from "../src/building-art";
+import { ART, ENEMY_ROLES, hasArt, type EnemyRole } from "../src/building-art";
 import type { TargetKind } from "../src/local-map";
 
-// The hunter has no art yet (placeholder marker in the game).
-const KINDS: TargetKind[] = ["power", "mine", "commsCentre", "dome"];
+const BUILDINGS: TargetKind[] = ["power", "mine", "commsCentre", "dome"];
+const EVERYTHING: (TargetKind | EnemyRole)[] = [...BUILDINGS, ...ENEMY_ROLES];
 
-describe("building art", () => {
-  it("has art for every target kind", () => {
-    for (const kind of KINDS) expect(hasArt(kind)).toBe(true);
+/** True if any stroke of `strokes` is the wide base line every building stands on. */
+function hasBaseLine(strokes: Record<string, readonly (readonly [number, number])[]>): boolean {
+  return Object.values(strokes).some((s) => s.length === 2 && s.every(([, y]) => y === 0) && Math.abs(s[1][0] - s[0][0]) > 2);
+}
+
+describe("line art", () => {
+  it("has art for every building kind and every enemy role, including the hunter", () => {
+    for (const kind of EVERYTHING) expect(hasArt(kind), kind).toBe(true);
+    expect(hasArt("hunter")).toBe(true);
   });
 
-  it("keeps every stroke inside its box, with the base at the bottom", () => {
-    for (const kind of KINDS) {
-      const art = BUILDING_ART[kind]!;
+  it("has no art for something that is not a target", () => {
+    expect(hasArt("ruin")).toBe(false);
+    expect(hasArt("toString")).toBe(false); // not fooled by inherited properties
+  });
+
+  it("keeps every stroke inside its box, with the ground at the bottom", () => {
+    for (const kind of EVERYTHING) {
+      const art = ART[kind];
       for (const strokes of [art.full, art.simple]) {
         for (const stroke of Object.values(strokes)) {
           for (const [x, y] of stroke) {
@@ -26,9 +37,27 @@ describe("building art", () => {
   });
 
   it("gives the terminal view more detail than the mini map", () => {
-    for (const kind of KINDS) {
-      const art = BUILDING_ART[kind]!;
+    for (const kind of EVERYTHING) {
+      const art = ART[kind];
       expect(Object.keys(art.full).length, kind).toBeGreaterThan(Object.keys(art.simple).length);
     }
+  });
+
+  it("draws every role differently, on the map and in the terminal view", () => {
+    for (const view of ["simple", "full"] as const) {
+      const drawn = EVERYTHING.map((kind) => JSON.stringify(ART[kind][view]));
+      expect(new Set(drawn).size, view).toBe(EVERYTHING.length);
+    }
+  });
+
+  it("stands every enemy on its own legs, wheels or tracks, not a building's base line", () => {
+    for (const role of ENEMY_ROLES) {
+      expect(hasBaseLine(ART[role].full), role).toBe(false);
+      expect(hasBaseLine(ART[role].simple), role).toBe(false);
+      // Something touches the ground.
+      const lowest = Math.max(...Object.values(ART[role].simple).flatMap((s) => s.map(([, y]) => y)));
+      expect(lowest, role).toBeCloseTo(0, 1);
+    }
+    expect(hasBaseLine(ART.dome.simple)).toBe(true);
   });
 });

@@ -1,15 +1,16 @@
 import type { TargetKind } from "./local-map";
 
 /**
- * Line art for buildings, as data. Every building is drawn in a box x -1..1 and
- * y -1..0, with the base at y = 0 and the top at y = -1. The same strokes serve
- * the terminal view (full detail) and the mini map (simplified).
+ * Line art for buildings and enemies, as data. Everything is drawn in a box x -1..1 and
+ * y -1..0, with the ground at y = 0 and the top at y = -1. The same strokes serve the
+ * terminal view (full detail) and the mini map (simplified). Buildings sit on a wide base
+ * line; enemies stand on legs, wheels or tracks and have none, so the two read apart.
  */
 
 export type Point = readonly [number, number];
 export type Stroke = readonly Point[];
 
-export interface BuildingArt {
+export interface LineArt {
   full: Record<string, Stroke>;
   simple: Record<string, Stroke>;
 }
@@ -29,7 +30,7 @@ const BASE: Stroke = [
 // Dome: a wide, low half-dome with ribs and a door.
 const DOME_OUTLINE = arc(0, 0, 1, 1, Math.PI, 2 * Math.PI, 28);
 
-const DOME: BuildingArt = {
+const DOME: LineArt = {
   full: {
     outline: DOME_OUTLINE,
     base: BASE,
@@ -69,7 +70,7 @@ const STACK_RIGHT: Stroke = [
   [0.5, 0],
 ];
 
-const POWER: BuildingArt = {
+const POWER: LineArt = {
   full: {
     leftStack: STACK_LEFT,
     rightStack: STACK_RIGHT,
@@ -89,7 +90,7 @@ const POWER: BuildingArt = {
 };
 
 // Mine: an open headframe with a wheel on top, not a solid shape that could read as a mountain.
-const MINE: BuildingArt = {
+const MINE: LineArt = {
   full: {
     legL: [
       [-0.45, 0],
@@ -135,7 +136,7 @@ const MAST: Stroke = [
 ];
 const LIGHT = arc(0, -0.85, 0.12, 0.12, 0, 2 * Math.PI, 16);
 
-const COMMS_CENTRE: BuildingArt = {
+const COMMS_CENTRE: LineArt = {
   full: {
     mast: MAST,
     light: LIGHT,
@@ -160,21 +161,230 @@ const COMMS_CENTRE: BuildingArt = {
   },
 };
 
-/** Art for each building kind. Every target kind now has art. */
-// The hunter has no art yet, so it is drawn with the placeholder marker.
-export const BUILDING_ART: Partial<Record<TargetKind, BuildingArt>> = {
+function closed(points: Point[]): Stroke {
+  return [...points, points[0]];
+}
+
+// Hunter: a two-legged walker with an arrowhead hull leaning forward and a missile rack
+// on its back. The one enemy that hunts, so the most aggressive silhouette.
+const HUNTER_HULL = closed([
+  [-0.7, -0.4],
+  [-0.45, -0.72],
+  [0.35, -0.72],
+  [0.8, -0.5],
+  [0.35, -0.36],
+  [-0.7, -0.36],
+]);
+const HUNTER_LEGS: Stroke = [
+  [-0.55, 0],
+  [-0.35, -0.18],
+  [-0.4, -0.36],
+];
+const HUNTER_LEG_FRONT: Stroke = [
+  [0.4, 0],
+  [0.2, -0.18],
+  [0.25, -0.36],
+];
+const HUNTER_RACK = closed([
+  [-0.35, -0.72],
+  [-0.35, -0.95],
+  [0.15, -0.95],
+  [0.15, -0.72],
+]);
+
+const HUNTER: LineArt = {
+  full: {
+    hull: HUNTER_HULL,
+    legBack: HUNTER_LEGS,
+    legFront: HUNTER_LEG_FRONT,
+    rack: HUNTER_RACK,
+    tubes: [
+      [-0.18, -0.72],
+      [-0.18, -0.95],
+    ],
+    tubes2: [
+      [-0.02, -0.72],
+      [-0.02, -0.95],
+    ],
+    sensor: [
+      [0.4, -0.55],
+      [0.6, -0.52],
+    ],
+  },
+  simple: {
+    hull: HUNTER_HULL,
+    legBack: HUNTER_LEGS,
+    legFront: HUNTER_LEG_FRONT,
+    rack: HUNTER_RACK,
+  },
+};
+
+// Patroller: a fast, low wedge on two wheels with a tall whip antenna. Guns only, no
+// missiles, so the gun is short and there is no rack.
+const PATROLLER_BODY = closed([
+  [-0.85, -0.28],
+  [-0.6, -0.5],
+  [0.3, -0.5],
+  [0.9, -0.28],
+]);
+const PATROLLER_WHEEL_L = arc(-0.5, -0.15, 0.15, 0.15, 0, 2 * Math.PI, 14);
+const PATROLLER_WHEEL_R = arc(0.5, -0.15, 0.15, 0.15, 0, 2 * Math.PI, 14);
+const PATROLLER_ANTENNA: Stroke = [
+  [-0.45, -0.5],
+  [-0.7, -1],
+];
+
+const PATROLLER: LineArt = {
+  full: {
+    body: PATROLLER_BODY,
+    wheelL: PATROLLER_WHEEL_L,
+    wheelR: PATROLLER_WHEEL_R,
+    hubL: arc(-0.5, -0.15, 0.04, 0.04, 0, 2 * Math.PI, 8),
+    hubR: arc(0.5, -0.15, 0.04, 0.04, 0, 2 * Math.PI, 8),
+    antenna: PATROLLER_ANTENNA,
+    gun: [
+      [0.05, -0.5],
+      [0.05, -0.6],
+      [0.55, -0.6],
+    ],
+    window: [
+      [-0.35, -0.42],
+      [0.15, -0.42],
+    ],
+  },
+  simple: {
+    body: PATROLLER_BODY,
+    wheelL: PATROLLER_WHEEL_L,
+    wheelR: PATROLLER_WHEEL_R,
+    antenna: PATROLLER_ANTENNA,
+  },
+};
+
+// Hauler: a long cargo box ahead of a small cab, on a track. Built to carry, not to fight.
+const HAULER_BOX = closed([
+  [-1, -0.3],
+  [-1, -0.8],
+  [0.3, -0.8],
+  [0.3, -0.3],
+]);
+const HAULER_CAB: Stroke = [
+  [0.3, -0.3],
+  [0.3, -0.6],
+  [0.65, -0.6],
+  [0.95, -0.4],
+  [0.95, -0.3],
+];
+const HAULER_TRACK = closed([
+  [-0.95, -0.3],
+  [-1.05, -0.15],
+  [-0.9, 0],
+  [0.85, 0],
+  [1, -0.15],
+  [0.95, -0.3],
+]);
+
+const HAULER: LineArt = {
+  full: {
+    box: HAULER_BOX,
+    cab: HAULER_CAB,
+    track: HAULER_TRACK,
+    podL: arc(-0.65, -0.55, 0.15, 0.15, 0, 2 * Math.PI, 14),
+    podR: arc(-0.15, -0.55, 0.15, 0.15, 0, 2 * Math.PI, 14),
+    cabWindow: [
+      [0.62, -0.52],
+      [0.85, -0.4],
+    ],
+    treads: [
+      [-0.7, -0.15],
+      [0.7, -0.15],
+    ],
+  },
+  simple: {
+    box: HAULER_BOX,
+    cab: HAULER_CAB,
+    track: HAULER_TRACK,
+  },
+};
+
+// Defender: a squat armoured shell on four stubby legs with a heavy twin cannon raised high.
+const DEFENDER_SHELL = closed([
+  [-0.7, -0.25],
+  [-0.85, -0.5],
+  [-0.5, -0.78],
+  [0.45, -0.78],
+  [0.8, -0.5],
+  [0.7, -0.25],
+]);
+const DEFENDER_CANNON: Stroke = [
+  [0.3, -0.72],
+  [1.05, -1],
+];
+const DEFENDER_LEG_L: Stroke = [
+  [-0.55, -0.25],
+  [-0.75, 0],
+];
+const DEFENDER_LEG_R: Stroke = [
+  [0.55, -0.25],
+  [0.75, 0],
+];
+
+const DEFENDER: LineArt = {
+  full: {
+    shell: DEFENDER_SHELL,
+    cannon: DEFENDER_CANNON,
+    cannon2: [
+      [0.38, -0.62],
+      [1.1, -0.9],
+    ],
+    legL: DEFENDER_LEG_L,
+    legInL: [
+      [-0.2, -0.25],
+      [-0.25, 0],
+    ],
+    legInR: [
+      [0.2, -0.25],
+      [0.25, 0],
+    ],
+    legR: DEFENDER_LEG_R,
+    slit: [
+      [-0.45, -0.5],
+      [0.15, -0.5],
+    ],
+  },
+  simple: {
+    shell: DEFENDER_SHELL,
+    cannon: DEFENDER_CANNON,
+    legL: DEFENDER_LEG_L,
+    legR: DEFENDER_LEG_R,
+  },
+};
+
+/**
+ * The enemy roles. Only the hunter is in the game so far; the others have art ready for
+ * when they arrive (#16). A boss is added by giving it a role and an entry in ART.
+ */
+export type EnemyRole = "hunter" | "patroller" | "hauler" | "defender";
+
+export const ENEMY_ROLES: readonly EnemyRole[] = ["hunter", "patroller", "hauler", "defender"];
+
+/** Art for everything that can be drawn as a target: each building kind and each enemy role. */
+export const ART: Record<TargetKind | EnemyRole, LineArt> = {
   dome: DOME,
   power: POWER,
   mine: MINE,
   commsCentre: COMMS_CENTRE,
+  hunter: HUNTER,
+  patroller: PATROLLER,
+  hauler: HAULER,
+  defender: DEFENDER,
 };
 
-export function hasArt(kind: TargetKind): boolean {
-  return BUILDING_ART[kind] !== undefined;
+export function hasArt(kind: string): kind is TargetKind | EnemyRole {
+  return Object.prototype.hasOwnProperty.call(ART, kind);
 }
 
 /**
- * Strokes a building's art centred on cx, with its base at baseY, scaled so that the
+ * Strokes a piece of art centred on cx, with its base at baseY, scaled so that the
  * box's half-width is `halfSize` pixels. Pure drawing: no state is read or changed.
  */
 export function strokeArt(
