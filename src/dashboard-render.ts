@@ -1,4 +1,4 @@
-import { BUILDING_ART, hasArt, strokeArt } from "./building-art";
+import { ART, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
 import { AVAILABLE_VERBS, VERB_GRID, blipStrength, buildingCells, gridDisableReady, isInsideBuilding, isLow, isPaused, isSuppressed, positionOf, ringReach, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
@@ -317,7 +317,7 @@ function drawLocalMap(
     // An enemy passing through a building is drawn faint, so it reads as inside, not a glitch.
     ctx.globalAlpha = isInsideBuilding(state, index, world) ? 0.3 : targeting && !inRange ? 0.6 : 1;
     if (hasArt(t.kind)) {
-      strokeArt(ctx, BUILDING_ART[t.kind]!.simple, tx, ty + iconWidth / 4, iconWidth / 2, color, 1.2, inRange ? 6 : 0);
+      strokeArt(ctx, ART[t.kind].simple, tx, ty + iconWidth / 4, iconWidth / 2, color, 1.2, inRange ? 6 : 0);
     } else {
       drawPlaceholderMarker(ctx, tx, ty, color, inRange);
     }
