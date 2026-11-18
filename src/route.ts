@@ -100,3 +100,25 @@ export function findRouteToAny(from: Cell, goals: readonly Cell[], map: LocalMap
   }
   return route.reverse();
 }
+
+/** Walks along a route for up to `distance` cells. Returns where it ends up and the route still to go. */
+export function walkPoint(pos: Cell, route: readonly Cell[], distance: number): { pos: Cell; route: Cell[] } {
+  let p = { ...pos };
+  let r = [...route];
+  let budget = distance;
+  while (budget > 0 && r.length > 0) {
+    const next = r[0];
+    const dx = next.x - p.x;
+    const dy = next.y - p.y;
+    const d = Math.hypot(dx, dy);
+    if (d <= budget) {
+      p = { ...next };
+      r = r.slice(1);
+      budget -= d;
+    } else {
+      p = { x: p.x + (dx / d) * budget, y: p.y + (dy / d) * budget };
+      budget = 0;
+    }
+  }
+  return { pos: p, route: r };
+}
