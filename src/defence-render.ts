@@ -1,5 +1,7 @@
 import type { Config } from "./config";
-import { HILL_SPAN, HILL_STEP, isWarning, missileBearing, missileDistance, shotDistance, type DefenceState } from "./defence";
+import { HILL_SPAN, HILL_STEP, hitCount, isWarning, missileBearing, missileDistance, shotDistance, type DefenceState } from "./defence";
+import type { ShieldView } from "./app";
+import { drawCracks, tracePlate } from "./plates";
 import { drawGlow } from "./render";
 
 const EYE_HEIGHT = 1; // the robot's eye above the ground, in the ground grid's units
@@ -15,7 +17,7 @@ type Project = (yaw: number, pitch: number) => [number, number];
  * stars converging on the aim point. A heading strip along the top shows the arc, the
  * launcher and every missile. Pure drawing: reads state, never changes it.
  */
-export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, shieldPlates: number, cfg: Config, mouseLocked = false): void {
+export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, shields: ShieldView, cfg: Config, mouseLocked = false): void {
   const { width: w, height: h } = cfg.canvas;
   const c = cfg.colors;
   const pxPerDegree = w / 2 / cfg.defence.viewYawDegrees;
@@ -104,19 +106,85 @@ export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, sh
     ctx.fillText("INCOMING", w / 2, h * 0.3);
   }
 
+  // The attack is over: say so, and how it went, before the dashboard returns by itself.
+  if (s.done) {
+    const hits = hitCount(s);
+    ctx.fillStyle = c.text;
+    ctx.font = "bold 28px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("ATTACK OVER", w / 2, h * 0.3);
+    ctx.font = "18px monospace";
+    ctx.fillStyle = hits === 0 ? c.energy : c.alert;
+    ctx.fillText(hits === 0 ? "ALL MISSILES SHOT DOWN" : `${hits} ${hits === 1 ? "HIT" : "HITS"} TAKEN`, w / 2, h * 0.3 + 34);
+  }
+
   ctx.fillStyle = c.text;
   ctx.font = "16px monospace";
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   ctx.fillText("HUNTER ATTACK", 20, 18);
-  ctx.textAlign = "right";
-  ctx.fillText(`SHIELDS ${shieldPlates} PLATES`, w - 20, 18);
+  drawShields(ctx, s, shields, w, cfg);
+  ctx.fillStyle = c.text;
+  ctx.font = "16px monospace";
   ctx.textAlign = "center";
+  ctx.textBaseline = "top";
   ctx.fillText(mouseLocked ? "MOUSE AIMS     HOLD BUTTON FIRE     ESC RELEASES" : "ARROWS AIM     HOLD SPACE FIRE     CLICK TO AIM WITH THE MOUSE", w / 2, h - 28);
 
   ctx.strokeStyle = c.frame;
   ctx.lineWidth = 4;
   ctx.strokeRect(2, 2, w - 4, h - 4);
+}
+
+/**
+ * The shields along the top right, live: a plate for each one the robot started with,
+ * filled while it stands, the top one cracked by the hits it has taken. The plate a
+ * missile has just hit flashes, cracked or broken.
+ */
+function drawShields(ctx: CanvasRenderingContext2D, s: DefenceState, shields: ShieldView, w: number, cfg: Config): void {
+  const c = cfg.colors;
+  const max = cfg.dashboard.shieldPlates;
+  const plateW = 22;
+  const plateH = 12;
+  const gap = 4;
+  const right = w - 20;
+  const left = right - max * plateW - (max - 1) * gap;
+  const y = 20;
+
+  ctx.fillStyle = c.text;
+  ctx.font = "16px monospace";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "top";
+  ctx.fillText("SHIELDS", left - 10, 18);
+
+  for (let i = 0; i < max; i++) {
+    const x = left + i * (plateW + gap);
+    const standing = i < shields.plates;
+    ctx.globalAlpha = standing ? 1 : 0.18;
+    ctx.fillStyle = c.shield;
+    ctx.strokeStyle = c.shield;
+    ctx.lineWidth = 1.5;
+    tracePlate(ctx, x, y, plateW, plateH);
+    if (standing) ctx.fill();
+    ctx.stroke();
+    if (standing && i === shields.plates - 1 && shields.hitsOnTop > 0) drawCracks(ctx, x, y, plateW, plateH, shields.hitsOnTop, c.background);
+  }
+  ctx.globalAlpha = 1;
+
+  // The plate just hit flashes: the cracked top plate, or the one that has just broken.
+  const lastHit = Math.max(-Infinity, ...s.missiles.filter((m) => m.state === "hit" && m.resolvedAt !== null).map((m) => m.resolvedAt!));
+  const age = s.elapsed - lastHit;
+  if (age >= 0 && age < 0.4) {
+    const index = shields.hitsOnTop > 0 ? shields.plates - 1 : shields.plates;
+    if (index >= 0 && index < max) {
+      ctx.globalAlpha = 1 - age / 0.4;
+      ctx.strokeStyle = c.alert;
+      ctx.lineWidth = 3;
+      tracePlate(ctx, left + index * (plateW + gap) - 2, y - 2, plateW + 4, plateH + 4);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
 }
 
 /** A missile's size on screen: small on the launcher, filling the view as it arrives. */

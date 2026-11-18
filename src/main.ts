@@ -1,10 +1,11 @@
-import { createAppState, updateApp, type AppState } from "./app";
+import { createAppState, shieldsDuringAttack, updateApp, type AppState } from "./app";
 import { config } from "./config";
 import type { Action } from "./dashboard";
 import { renderDashboard } from "./dashboard-render";
 import { combineAim, mouseAim } from "./defence";
 import { renderDefence } from "./defence-render";
 import { InputController } from "./input";
+import { createInputGate, gateInput } from "./input-gate";
 import { render } from "./render";
 import { SoundPlayer, eventsBetween } from "./sound";
 
@@ -33,6 +34,7 @@ let accumulator = 0;
 let lastTime = performance.now();
 // Presses wait here until a fixed step consumes them, so none are lost between frames.
 let pending: Action[] = [];
+let gate = createInputGate(state.screen);
 
 function frame(now: number): void {
   accumulator += (now - lastTime) / 1000;
@@ -47,7 +49,11 @@ function frame(now: number): void {
   while (accumulator >= fixedDt) {
     const before = state;
     const aim = combineAim(input.getAim(), mouseAim(mouse.dx / steps, mouse.dy / steps, fixedDt, config));
-    state = updateApp(state, { actions: pending, steering: input.getSteering(), aim, fire: input.isFireHeld() }, fixedDt, config, newSeed);
+    const raw = { actions: pending, steering: input.getSteering(), aim, fire: input.isFireHeld() };
+    // Presses made on one screen must not spill onto the next.
+    const gated = gateInput(gate, state.screen, raw, fixedDt, config);
+    gate = gated.gate;
+    state = updateApp(state, gated.input, fixedDt, config, newSeed);
     for (const event of eventsBetween(before, state, config)) sound.play(event);
     pending = [];
     accumulator -= fixedDt;
@@ -58,7 +64,7 @@ function frame(now: number): void {
   if (state.screen === "dashboard") {
     renderDashboard(ctx!, state.dashboard, config, !sound.isMuted());
   } else if (state.screen === "defence") {
-    renderDefence(ctx!, state.defence, state.dashboard.shieldPlates, config, input.isPointerLocked());
+    renderDefence(ctx!, state.defence, shieldsDuringAttack(state.dashboard, state.defence, config), config, input.isPointerLocked());
   } else {
     render(ctx!, state.flight, config, state.target.kind, state.shielded);
   }
