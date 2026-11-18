@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
-import { createDashboardState, stepDashboard, worldFor, type Action, type DashboardState, type World } from "../src/dashboard";
+import { buildingCells, createDashboardState, routeTo, stepDashboard, worldFor, type Action, type DashboardState, type World } from "../src/dashboard";
 import { mapOf } from "./helpers";
 
 const DT = 1 / 60;
@@ -122,6 +122,57 @@ describe("walking", () => {
       s = stepDashboard(s, [], DT, world).state;
       const cell = { x: Math.round(s.pos.x), y: Math.round(s.pos.y) };
       expect(world.map.tiers[cell.y][cell.x]).not.toBe(2);
+    }
+  });
+});
+
+describe("buildings block the robot (design-notes 4.7)", () => {
+  // A dome at (6, 5) on open ground.
+  const withDome: World = { ...flatWorld, targets: [{ col: 6, row: 5, kind: "dome", hasDrop: false, network: 0 }] };
+  const at = (x: number, y: number): DashboardState => ({ ...createDashboardState(config), pos: { x, y } });
+
+  it("a route goes around an intact building, never through it", () => {
+    const route = routeTo(at(5, 5), { col: 7, row: 5 }, withDome)!;
+    expect(route[route.length - 1]).toEqual({ x: 7, y: 5 });
+    expect(route.some((c) => c.x === 6 && c.y === 5)).toBe(false);
+  });
+
+  it("choosing a building walks to the nearest free cell beside it", () => {
+    const route = routeTo(at(3, 5), { col: 6, row: 5 }, withDome)!;
+    expect(route[route.length - 1]).toEqual({ x: 5, y: 5 });
+  });
+
+  it("choosing a building while already beside it is an empty walk, not a refusal", () => {
+    expect(routeTo(at(5, 5), { col: 6, row: 5 }, withDome)).toEqual([]);
+  });
+
+  it("confirming a building in the chooser sets a route beside it", () => {
+    const start = { ...at(3, 5), mode: "moving" as const, cross: { col: 6, row: 5 } };
+    const s = step(start, ["activate"], DT, withDome);
+    expect(s.mode).toBe("browse");
+    expect(s.route[s.route.length - 1]).toEqual({ x: 5, y: 5 });
+  });
+
+  it("a ruin is passable rubble", () => {
+    const ruined = { ...at(5, 5), ruins: [0] };
+    expect(routeTo(ruined, { col: 6, row: 5 }, withDome)).toEqual([{ x: 6, y: 5 }]);
+  });
+
+  it("a hunter is not a building and does not block", () => {
+    const withHunter: World = { ...flatWorld, targets: [{ col: 6, row: 5, kind: "hunter", hasDrop: false, network: 0 }] };
+    expect(buildingCells(at(5, 5), withHunter).size).toBe(0);
+  });
+
+  it("the robot never stands on an intact building on the real map", () => {
+    const blocked = buildingCells(createDashboardState(config), world);
+    for (const [i, t] of world.targets.entries()) {
+      if (t.kind === "hunter") continue;
+      let s: DashboardState = { ...createDashboardState(config), mode: "moving", cross: { col: t.col, row: t.row } };
+      s = stepDashboard(s, ["activate"], DT, world).state;
+      for (let n = 0; n < 1200 && s.route.length > 0; n++) {
+        s = stepDashboard(s, [], 1 / 10, world).state;
+        expect(blocked.has(Math.round(s.pos.y) * world.map.cols + Math.round(s.pos.x)), `target ${i}`).toBe(false);
+      }
     }
   });
 });

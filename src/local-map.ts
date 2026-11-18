@@ -1,5 +1,5 @@
 import { NETWORK } from "./map";
-import { reachableFrom, type Cell } from "./route";
+import { cellKey, isPassable, OFFSETS, reachableFrom, type Cell } from "./route";
 import { createRng } from "./rng";
 
 /** 0 = valley, 1 = ground, 2 = high ground. */
@@ -51,13 +51,6 @@ export interface World {
 
 /** The kinds besides the power station, which every network has exactly one of. */
 const TARGET_KINDS: readonly TargetKind[] = ["mine", "commsCentre", "dome"];
-
-const OFFSETS: readonly (readonly [number, number])[] = [
-  [1, 0],
-  [-1, 0],
-  [0, 1],
-  [0, -1],
-];
 
 /** Where each town sits: the network's hand-placed positions, spread over the whole map. */
 export function townCentres(cfg: LocalMapConfig): Town[] {
@@ -190,6 +183,10 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
       if (!inTown(town, cfg.townRadiusCols, cfg.townRadiusRows, col, row)) continue;
       if (map.tiers[row][col] === 0) continue;
       if (targets.some((t) => t.col === col && t.row === row)) continue;
+      // Buildings block the robot, so a building may not cut off a town or another building.
+      // The hunter is not a building and may stand anywhere.
+      const isHunter = placed === 1;
+      if (!isHunter && !keepsRoutesOpen(map, towns, [...targets.filter((t) => t.kind !== "hunter"), { col, row }])) continue;
       // Each network has one power station, placed first. It is never a drop: it cannot be destroyed.
       // The hunter, placed second, is the network's one enemy. It has no drop.
       const kind = placed === 0 ? "power" : placed === 1 ? "hunter" : TARGET_KINDS[Math.floor(rng() * TARGET_KINDS.length)];
@@ -199,6 +196,19 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
     }
   }
   return targets;
+}
+
+/**
+ * The player's routes survive these buildings (design-notes 4.7): no building sits on a
+ * town centre, every town can still be walked to from the first, and every building
+ * has a free cell beside it that the robot can reach. Enemies need no such check.
+ */
+export function keepsRoutesOpen(map: LocalMap, towns: readonly Town[], buildings: readonly { col: number; row: number }[]): boolean {
+  if (buildings.some((b) => towns.some((t) => t.x === b.col && t.y === b.row))) return false;
+  const blocked = new Set(buildings.map((b) => cellKey(map, b.col, b.row)));
+  const reached = reachableFrom(towns[0], map, blocked);
+  if (!towns.every((t) => reached.has(cellKey(map, t.x, t.y)))) return false;
+  return buildings.every((b) => OFFSETS.some(([dx, dy]) => reached.has(cellKey(map, b.col + dx, b.row + dy)) && isPassable(map, b.col + dx, b.row + dy, blocked)));
 }
 
 /** Averages each cell with its neighbours, clamping at the edges. */
