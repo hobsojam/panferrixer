@@ -16,7 +16,7 @@ import {
   type DashboardState,
   type World,
 } from "./dashboard";
-import { createDefence, hitCount, stepDefence, type Aim, type DefenceState } from "./defence";
+import { createDefence, hitCount, stepDefence, summaryOver, type Aim, type DefenceState } from "./defence";
 import { createInitialState, flightSecondsFor, updateFlight } from "./flight";
 import type { Target } from "./local-map";
 import { createRng } from "./rng";
@@ -95,7 +95,8 @@ export function updateApp(
     // A fresh press fires as well as holding, so a quick tap is never lost between steps.
     const fire = (input.fire ?? false) || input.actions.includes("activate");
     const defence = stepDefence(state.defence, input.aim ?? { yaw: 0, pitch: 0 }, fire, dt, cfg);
-    if (!defence.done) return { ...state, dashboard: timed, defence };
+    // Over, but the summary shows for a moment before the dashboard returns by itself.
+    if (!summaryOver(defence, cfg)) return { ...state, dashboard: timed, defence };
     // The attack is over: every missile that got through is a hit on the shields. The
     // hunter then holds off long enough for the player to strike back (design-notes 4.10).
     const hit = applyShieldHits(timed, hitCount(defence), cfg.dashboard.hitsPerPlate);

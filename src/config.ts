@@ -14,6 +14,12 @@ export const config = {
     fixedDtSeconds: 1 / 60,
   },
 
+  // Input between screens (design-notes 4.8): after a screen changes, presses are ignored
+  // this long, and a key held through the change counts only once released and pressed again.
+  input: {
+    screenChangeQuietSeconds: 0.5,
+  },
+
   flight: {
     durationSeconds: 30, // the longest flight; a nearer target is quicker (design-notes 4.10)
     totalDistance: 3000, // the longest course; forwardSpeed = totalDistance / durationSeconds
@@ -118,6 +124,7 @@ export const config = {
     turnRateDegreesPerSecond: 80, // the difficulty dial: caps keys and mouse alike
     shotSpeed: 1.6, // distance per second, in the same units as gunRange and launchDistance
     fireIntervalSeconds: 0.12, // rate of fire while fire is held
+    summarySeconds: 2, // how long "ATTACK OVER" shows before the dashboard returns by itself
     hitToleranceDegrees: 3.5, // how close to a missile's bearing a round must pass to destroy it
     mouseDegreesPerPixel: 0.12, // mouse sensitivity while the pointer is captured; still capped by the turn rate
   },

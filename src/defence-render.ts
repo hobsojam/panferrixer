@@ -1,5 +1,5 @@
 import type { Config } from "./config";
-import { HILL_SPAN, HILL_STEP, isWarning, missileBearing, missileDistance, shotDistance, type DefenceState } from "./defence";
+import { HILL_SPAN, HILL_STEP, hitCount, isWarning, missileBearing, missileDistance, shotDistance, type DefenceState } from "./defence";
 import { drawGlow } from "./render";
 
 const EYE_HEIGHT = 1; // the robot's eye above the ground, in the ground grid's units
@@ -102,6 +102,19 @@ export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, sh
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("INCOMING", w / 2, h * 0.3);
+  }
+
+  // The attack is over: say so, and how it went, before the dashboard returns by itself.
+  if (s.done) {
+    const hits = hitCount(s);
+    ctx.fillStyle = c.text;
+    ctx.font = "bold 28px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("ATTACK OVER", w / 2, h * 0.3);
+    ctx.font = "18px monospace";
+    ctx.fillStyle = hits === 0 ? c.energy : c.alert;
+    ctx.fillText(hits === 0 ? "ALL MISSILES SHOT DOWN" : `${hits} ${hits === 1 ? "HIT" : "HITS"} TAKEN`, w / 2, h * 0.3 + 34);
   }
 
   ctx.fillStyle = c.text;

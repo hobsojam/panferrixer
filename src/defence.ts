@@ -48,6 +48,7 @@ export interface DefenceState {
   lastShot: number; // time of the last round, for the rate of fire
   hills: number[]; // the horizon's silhouette: heights in degrees, every HILL_STEP degrees from -HILL_SPAN
   done: boolean; // every missile has been shot down or has arrived
+  endedAt: number | null; // when the last missile was resolved; the summary shows from then
 }
 
 /** Turning input for one step: each axis -1..1, scaled by the turn rate. */
@@ -91,7 +92,7 @@ export function createDefence(seed: number, cfg: Config, rangeCells: number = cf
     }
   }
   const hills = Array.from({ length: Math.floor((2 * HILL_SPAN) / HILL_STEP) + 1 }, () => rangeFloat(rng, 0.3, 2.6));
-  return { elapsed: 0, yaw: launcher.yaw, pitch: 0, launcher, missiles, shots: [], lastShot: -Infinity, hills, done: false };
+  return { elapsed: 0, yaw: launcher.yaw, pitch: 0, launcher, missiles, shots: [], lastShot: -Infinity, hills, done: false, endedAt: null };
 }
 
 /**
@@ -143,7 +144,8 @@ export function separation(a: Bearing, b: Bearing): number {
  * that reaches the robot counts as a hit.
  */
 export function stepDefence(s: DefenceState, aim: Aim, fire: boolean, dt: number, cfg: Config): DefenceState {
-  if (s.done) return s;
+  // Once over, only the clock runs, for the summary (design-notes 4.8).
+  if (s.done) return { ...s, elapsed: s.elapsed + dt };
   const d = cfg.defence;
   const elapsed = s.elapsed + dt;
   const turn = d.turnRateDegreesPerSecond * dt;
@@ -183,7 +185,15 @@ export function stepDefence(s: DefenceState, aim: Aim, fire: boolean, dt: number
     }
   }
   const done = missiles.every((m) => m.state !== "flying");
-  return { ...s, elapsed, yaw, pitch, missiles, shots, lastShot, done };
+  return { ...s, elapsed, yaw, pitch, missiles, shots, lastShot, done, endedAt: done ? elapsed : null };
+}
+
+/**
+ * True once the attack is over and its summary has been shown long enough: the attack
+ * then returns to the dashboard by itself, with no press needed (design-notes 4.8).
+ */
+export function summaryOver(s: DefenceState, cfg: Config): boolean {
+  return s.done && s.endedAt !== null && s.elapsed - s.endedAt >= cfg.defence.summarySeconds;
 }
 
 /** Missiles that got through: each one is a hit on the shields. */
