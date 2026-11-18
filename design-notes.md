@@ -100,6 +100,9 @@ Six enemy types in ascending order of power, described by role:
 - It **starts automatically** when incoming missiles are detected. There is no real in-flight "incoming missile" with a time of flight; the attack instantly starts the mini-game. (The manual describes selecting the Guns icon; the Amstrad version does not need it.)
 - View: a tunnel drawn as two blue walls (the author's reading: an abstract representation of orientation, not a real thing). Incoming missiles are drawn as pyramid-like wireframes flying towards the player; they grow as they approach (far: a small triangle near the centre; close: several large overlapping pyramids).
 - The player fires guns to destroy the incoming missiles. Outbound fire is shown as yellow stars.
+- Closer reading of the screenshots: the "tunnel" is not a full tube but two blue trapezoid walls, one each side, angled in toward a central gap (a bow-tie shape). The yellow stars appear in pairs, one each side, on the inner edges of the walls, with smaller clusters further in toward the centre. This suggests two guns firing inward from the sides, their streams converging into depth. [Inferred from screenshots]
+- There is no crosshair, ship or ground in the view: it is purely the robot's point of view.
+- Aiming is up, down, left and right; the walls move as the player aims, to give some perspective. [Author-observed]
 - A missile that is not destroyed hits the robot and damages or destroys it. [Manual]
 - Which enemies trigger it: those with missiles (the manual lists missile systems on haulers, defenders, hunters and the bosses; patrollers have guns only).
 
@@ -279,6 +282,23 @@ The original already has four types (dome, power plant, mine, beacon), each with
 - Interaction to decide: attacks can land during the 45-second shield window. If the window keeps running, a defence engagement costs the player shots and creates real tension; if it pauses, attacks are a free interruption. Lean: let the window run, with short engagements so an attack costs seconds, not the whole window. Feel-test.
 - Decided (author): an attack cannot start during an outbound missile flight; no fiction is offered for it. Implementation note: defer an attack that comes due during a flight until the flight ends, so the rule delays attacks and does not cancel them. Missiles are limited, so chaining flights to dodge attacks is not an exploit worth worrying about.
 - Controls (author): arrow keys or the mouse. Support both: the missile flight needs only left and right (arrow keys, or mouse horizontal movement), and the defence mini-game suits mouse aiming as well as arrow keys. A gamepad could come later.
+- **Correction to the first build (author):** the first implementation played as a 2D "Space Invaders" layout: a robot at the bottom of the screen sliding left and right on lanes and firing straight up at missiles coming down. That does not match the original or the intent. Defence is a first-person turret view, not a third-person lane shooter, and must not reuse the flight's lateral steering.
+- **Aiming model (decided, author): yaw and pitch within a limited arc.** Considered: Cartesian (an aim point moving over a fixed scene) and full yaw and pitch (the view turns freely). Chosen: the view turns (yaw and pitch, no roll) but is clamped to a forward arc, starting at about ±45° yaw by ±25° pitch, with every missile coming from inside that arc. Reasons:
+  - Within a small arc, turning reads almost like Cartesian aiming, so the view stays readable and avoids flight-sim creep (design principle 3).
+  - Missiles can start just outside the visible view, so "which one do I turn toward first" becomes a real decision without needing a full radar. A simple edge marker shows a missile that is off screen.
+  - The walls do real orientation work: they swing and tilt as the view turns.
+  - **Turn rate is the dial**: it limits mouse and keys alike, so the two inputs play the same game, and it gives a natural upgrade (a faster turret).
+  - The arc limits are config values, so playtesting can widen them toward full yaw and pitch or narrow them toward Cartesian without a redesign.
+  - Input: arrow keys turn at the turn rate; the mouse turns the view through pointer lock (relative movement, still capped at the turn rate). Pointer lock costs a click to capture the mouse and Esc to release it.
+- **View (decided, author):** our own take on the original's visual language, not a copy of it. Two blue walls flanking a central gap, moving with the view; incoming missiles as blue wireframe pyramids that start small near the centre of their bearing and grow as they close; outbound fire as yellow stars. The aim point is the centre of the view.
+- **Guns (decided, author): two guns converging on the centre.** Many games of the era (Elite, 3D Starstrike, Zoids) used the same layout. Reasons:
+  - A single gun from the bottom centre runs its stream up the middle of the screen, over the aim point and the target, and brings back the rejected "cannon at the bottom" look. A single gun from the centre makes each shot a shrinking dot, so the player loses the sense of fire travelling.
+  - Streams from the sides stay off the target, frame the aim point, and show depth as they close and meet.
+  - It matches the screenshots' paired yellow stars.
+  - Upgrade option: a second pair of guns (four in all, like a Lancaster turret) as a visible fire-rate upgrade, alongside a faster turret. Four guns are not the default: they add visual noise without gameplay on their own.
+  - Parked: a convergence-range mechanic, where the streams meet at a set distance (as Second World War fighters set their guns to converge), so missiles near that range are easiest to hit. Interesting, but it adds a rule to a ten-second game; revisit only if the PoC needs more depth.
+- **Shots travel (decided, author).** Stars take time to reach a missile, so the player must lead a little and choose which missile to turn toward first; this is where the "more targets than can be handled at once" pressure (section 4.9) comes from. Shot speed is a config value.
+- **Missiles fly straight for now (decided, author).** Each comes in on a straight line from its bearing, which keeps the view readable while the turret aiming is tuned. Weaving or curving missiles are a later option, for example as a trait of tougher enemies.
 - Length and damage depend on the enemy (author): a standard enemy is about 10 seconds with fairly low damage; stronger enemies run longer and hit harder; hard cap of about one minute. Tune length through the number and spacing of missiles in a wave.
 
 ### 4.9 Armour arithmetic (starting values for the PoC config)
