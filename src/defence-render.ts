@@ -1,22 +1,26 @@
 import type { Config } from "./config";
-import { isWarning, missileDistance, shotDistance, type DefenceState } from "./defence";
+import { HILL_SPAN, HILL_STEP, isWarning, missileBearing, missileDistance, shotDistance, type DefenceState } from "./defence";
 import { drawGlow } from "./render";
 
+const EYE_HEIGHT = 1; // the robot's eye above the ground, in the ground grid's units
+const GRID_LINES_ACROSS = [-12, -8, -5, -3, -1.5, 0, 1.5, 3, 5, 8, 12]; // lines running toward the horizon
+const GRID_LINES_DEEP = [1.6, 2.5, 4, 6.5, 10, 16, 26, 42]; // lines parallel to the horizon
+
+type Project = (yaw: number, pitch: number) => [number, number];
+
 /**
- * The hunter's attack, seen from the robot (design-notes 2.9a and 4.8): two blue walls
- * flanking a central gap that swing as the view turns, incoming missiles as blue
- * wireframe pyramids that grow as they close, and the two guns' rounds as yellow stars
- * converging on the aim point at the centre. Pure drawing: reads state, never changes it.
+ * The hunter's attack, seen from the robot (design-notes 4.8): a horizon and ground that
+ * slide as the view turns, a hill silhouette with the launcher on it, incoming missiles as
+ * blue wireframe pyramids fanning out from the launcher, and the two guns' rounds as yellow
+ * stars converging on the aim point. A heading strip along the top shows the arc, the
+ * launcher and every missile. Pure drawing: reads state, never changes it.
  */
 export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, shieldPlates: number, cfg: Config): void {
   const { width: w, height: h } = cfg.canvas;
   const c = cfg.colors;
   const pxPerDegree = w / 2 / cfg.defence.viewYawDegrees;
   // Screen position of a bearing, for the current view direction.
-  const project = (yaw: number, pitch: number): [number, number] => [
-    w / 2 + (yaw - s.yaw) * pxPerDegree,
-    h / 2 - (pitch - s.pitch) * pxPerDegree,
-  ];
+  const project: Project = (yaw, pitch) => [w / 2 + (yaw - s.yaw) * pxPerDegree, h / 2 - (pitch - s.pitch) * pxPerDegree];
 
   ctx.fillStyle = c.background;
   ctx.fillRect(0, 0, w, h);
@@ -25,20 +29,18 @@ export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, sh
   ctx.rect(4, 4, w - 8, h - 8);
   ctx.clip();
 
-  drawWalls(ctx, project(0, 0), w, h, cfg);
+  drawGround(ctx, project, w, h, cfg);
+  drawHills(ctx, s, project, cfg);
+  drawLauncher(ctx, s, project, cfg);
 
   // Incoming missiles, nearest drawn last so it overlaps the far ones.
   const flying = s.missiles
     .filter((m) => m.state === "flying" && m.spawn <= s.elapsed)
     .sort((a, b) => missileDistance(b, s.elapsed) - missileDistance(a, s.elapsed));
   for (const m of flying) {
-    const [x, y] = project(m.yaw, m.pitch);
-    const size = 8 / (0.15 + missileDistance(m, s.elapsed));
-    if (x < -size || x > w + size || y < -size || y > h + size) {
-      drawEdgeMarker(ctx, x, y, w, h, c.alert);
-    } else {
-      drawPyramid(ctx, x, y, size, c.shield);
-    }
+    const b = missileBearing(m, s.elapsed);
+    const [x, y] = project(b.yaw, b.pitch);
+    drawPyramid(ctx, x, y, missileSize(missileDistance(m, s.elapsed)), c.shield);
   }
 
   // A missile shot down bursts where it was.
@@ -46,10 +48,10 @@ export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, sh
     if (m.state !== "shot" || m.resolvedAt === null) continue;
     const age = s.elapsed - m.resolvedAt;
     if (age > 0.35) continue;
-    const [x, y] = project(m.yaw, m.pitch);
-    const size = 8 / (0.15 + missileDistance(m, m.resolvedAt));
+    const b = missileBearing(m, m.resolvedAt);
+    const [x, y] = project(b.yaw, b.pitch);
     ctx.globalAlpha = 1 - age / 0.35;
-    drawStar(ctx, x, y, size * (0.6 + age * 3), c.marker);
+    drawStar(ctx, x, y, missileSize(missileDistance(m, m.resolvedAt)) * (0.6 + age * 3), c.marker);
     ctx.globalAlpha = 1;
   }
 
@@ -60,7 +62,7 @@ export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, sh
   ];
   for (const shot of s.shots) {
     if (shot.state !== "flying") continue;
-    const f = Math.min(1, shotDistance(shot, s.elapsed, cfg));
+    const f = Math.min(1, shotDistance(shot, s.elapsed, cfg) / cfg.defence.gunRange);
     const ease = (1 - 1 / (1 + 6 * f)) / (1 - 1 / 7); // fast out of the barrel, slowing into the distance
     const [tx, ty] = project(shot.yaw, shot.pitch);
     for (const [gx, gy] of guns) {
@@ -69,7 +71,7 @@ export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, sh
   }
 
   // The aim point: where the two streams meet.
-  ctx.globalAlpha = 0.5;
+  ctx.globalAlpha = 0.6;
   ctx.strokeStyle = c.marker;
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -91,6 +93,8 @@ export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, sh
     ctx.globalAlpha = 1;
   }
   ctx.restore();
+
+  drawHeadingStrip(ctx, s, w, cfg);
 
   if (isWarning(s, cfg) && Math.floor(s.elapsed * 4) % 2 === 0) {
     ctx.fillStyle = c.alert;
@@ -115,35 +119,161 @@ export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, sh
   ctx.strokeRect(2, 2, w - 4, h - 4);
 }
 
+/** A missile's size on screen: small on the launcher, filling the view as it arrives. */
+function missileSize(distance: number): number {
+  return 8 / (0.15 + distance);
+}
+
+/** Bearing of a point on the ground, seen from the robot's eye. */
+function groundBearing(x: number, z: number): [number, number] {
+  const deg = 180 / Math.PI;
+  return [Math.atan2(x, z) * deg, -Math.atan2(EYE_HEIGHT, Math.hypot(x, z)) * deg];
+}
+
 /**
- * Two walls angled in toward a central gap, anchored straight ahead. The outer edges
- * move a little more than the inner ones as the view turns, so the walls swing.
+ * The ground below the horizon, with a sparse grid fixed to the world: lines running
+ * toward the horizon slide as the view turns, and lines across it close up with distance.
  */
-function drawWalls(ctx: CanvasRenderingContext2D, ahead: [number, number], w: number, h: number, cfg: Config): void {
+function drawGround(ctx: CanvasRenderingContext2D, project: Project, w: number, h: number, cfg: Config): void {
   const c = cfg.colors;
-  const [ax, ay] = ahead;
-  const shiftX = ax - w / 2;
-  const shiftY = ay - h / 2;
-  const outerX = w / 2 + shiftX * 1.3;
-  const outerY = h / 2 + shiftY * 1.3;
-  for (const side of [-1, 1]) {
-    const points: [number, number][] = [
-      [outerX + side * w * 0.62, outerY - h * 0.34],
-      [ax + side * w * 0.11, ay - h * 0.08],
-      [ax + side * w * 0.11, ay + h * 0.08],
-      [outerX + side * w * 0.62, outerY + h * 0.34],
-    ];
-    drawGlow(ctx, c.mountain, 6, () => {
+  const [, horizonY] = project(0, 0);
+  ctx.fillStyle = c.ground;
+  ctx.fillRect(0, horizonY, w, h - horizonY);
+
+  ctx.strokeStyle = c.floor;
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.55;
+  ctx.beginPath();
+  for (const x of GRID_LINES_ACROSS) {
+    for (let i = 0, z = 0.6; i < 40; i++, z *= 1.18) {
+      const [px, py] = project(...groundBearing(x, z));
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+  }
+  for (const z of GRID_LINES_DEEP) {
+    for (let a = -80; a <= 80; a += 4) {
+      const [px, py] = project(...groundBearing(z * Math.tan((a * Math.PI) / 180), z));
+      if (a === -80) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  ctx.strokeStyle = c.mountain;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, horizonY);
+  ctx.lineTo(w, horizonY);
+  ctx.stroke();
+}
+
+/** A low hill silhouette along the horizon, from the attack's seed. */
+function drawHills(ctx: CanvasRenderingContext2D, s: DefenceState, project: Project, cfg: Config): void {
+  const c = cfg.colors;
+  const points = s.hills.map((height, i) => project(-HILL_SPAN + i * HILL_STEP, height));
+  const [, horizonY] = project(0, 0);
+  drawGlow(ctx, c.mountain, 4, () => {
+    ctx.beginPath();
+    ctx.moveTo(points[0][0], horizonY);
+    for (const [x, y] of points) ctx.lineTo(x, y);
+    ctx.lineTo(points[points.length - 1][0], horizonY);
+    ctx.closePath();
+    ctx.fillStyle = c.mountainFill;
+    ctx.fill();
+    ctx.strokeStyle = c.mountain;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  });
+}
+
+/** The hunter's launcher on the horizon: a placeholder marker, with a flash as each missile leaves. */
+function drawLauncher(ctx: CanvasRenderingContext2D, s: DefenceState, project: Project, cfg: Config): void {
+  const c = cfg.colors;
+  const [x, y] = project(s.launcher.yaw, s.launcher.pitch);
+  drawGlow(ctx, c.alert, 6, () => {
+    ctx.strokeStyle = c.alert;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x - 7, y + 3);
+    ctx.lineTo(x, y - 6);
+    ctx.lineTo(x + 7, y + 3);
+    ctx.closePath();
+    ctx.stroke();
+  });
+  if (s.missiles.some((m) => s.elapsed >= m.spawn && s.elapsed - m.spawn < 0.12)) {
+    drawGlow(ctx, c.marker, 12, () => {
+      ctx.fillStyle = c.marker;
       ctx.beginPath();
-      ctx.moveTo(points[0][0], points[0][1]);
-      for (const [x, y] of points.slice(1)) ctx.lineTo(x, y);
-      ctx.closePath();
-      ctx.fillStyle = c.mountainFill;
+      ctx.arc(x, y - 7, 5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = c.mountain;
-      ctx.lineWidth = 2;
-      ctx.stroke();
     });
+  }
+}
+
+/**
+ * Along the top: the turret's arc with its edges marked, the part of it in view, the
+ * launcher, and a tick for every missile in the air, including those off screen.
+ */
+function drawHeadingStrip(ctx: CanvasRenderingContext2D, s: DefenceState, w: number, cfg: Config): void {
+  const c = cfg.colors;
+  const d = cfg.defence;
+  const span = d.arcYawDegrees + d.viewYawDegrees; // everything that can be in view at full turn
+  const left = w * 0.22;
+  const right = w * 0.78;
+  const y = 52;
+  const at = (yaw: number) => left + ((yaw - s.launcher.yaw + span) / (2 * span)) * (right - left);
+
+  ctx.strokeStyle = c.panelDim;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(left, y);
+  ctx.lineTo(right, y);
+  for (let deg = -Math.floor(span / 10) * 10; deg <= span; deg += 10) {
+    ctx.moveTo(at(deg), y - 3);
+    ctx.lineTo(at(deg), y + 3);
+  }
+  ctx.stroke();
+
+  // The arc's edges: the view centre can turn no further.
+  ctx.strokeStyle = c.text;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (const edge of [-d.arcYawDegrees, d.arcYawDegrees]) {
+    ctx.moveTo(at(edge), y - 8);
+    ctx.lineTo(at(edge), y + 8);
+  }
+  ctx.stroke();
+
+  // The part of the world in view.
+  ctx.globalAlpha = 0.7;
+  ctx.strokeStyle = c.marker;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(at(s.yaw - d.viewYawDegrees), y - 6, at(s.yaw + d.viewYawDegrees) - at(s.yaw - d.viewYawDegrees), 12);
+  ctx.globalAlpha = 1;
+
+  // The launcher, below the line.
+  const lx = at(s.launcher.yaw);
+  ctx.fillStyle = c.alert;
+  ctx.beginPath();
+  ctx.moveTo(lx, y + 4);
+  ctx.lineTo(lx - 5, y + 11);
+  ctx.lineTo(lx + 5, y + 11);
+  ctx.closePath();
+  ctx.fill();
+
+  // Every missile in the air, above the line.
+  ctx.fillStyle = c.shield;
+  for (const m of s.missiles) {
+    if (m.state !== "flying" || m.spawn > s.elapsed) continue;
+    const mx = at(missileBearing(m, s.elapsed).yaw);
+    ctx.beginPath();
+    ctx.moveTo(mx, y - 4);
+    ctx.lineTo(mx - 4, y - 11);
+    ctx.lineTo(mx + 4, y - 11);
+    ctx.closePath();
+    ctx.fill();
   }
 }
 
@@ -180,23 +310,4 @@ function drawStar(ctx: CanvasRenderingContext2D, x: number, y: number, size: num
     }
     ctx.stroke();
   });
-}
-
-/** A missile beyond the edge of the view: an arrow on the edge, pointing toward it. */
-function drawEdgeMarker(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string): void {
-  const inset = 18;
-  const ex = Math.max(inset, Math.min(w - inset, x));
-  const ey = Math.max(inset, Math.min(h - inset, y));
-  const angle = Math.atan2(y - ey, x - ex);
-  ctx.save();
-  ctx.translate(ex, ey);
-  ctx.rotate(angle);
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(9, 0);
-  ctx.lineTo(-5, -7);
-  ctx.lineTo(-5, 7);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
 }

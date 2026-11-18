@@ -3,16 +3,28 @@ import { createRng, rangeInt, rangeFloat } from "./rng";
 
 /**
  * The missile-defence mini-game as a first-person turret (design-notes 4.8). Angles are
- * in degrees: yaw is left (-) and right (+), pitch is down (-) and up (+). Distance runs
- * from 0 at the robot to 1 where a missile appears, which is also the guns' range.
+ * in degrees: yaw is left (-) and right (+) of the launcher, pitch is down (-) and up (+)
+ * from the horizon. Distance runs from 0 at the robot outward; the guns reach `gunRange`
+ * and missiles leave the launcher at `launchDistance`, beyond it.
  */
 
-/** One incoming missile. It flies straight at the robot along a fixed bearing, growing as it closes. */
-export interface Missile {
-  spawn: number; // defence clock time it appears
-  arrive: number; // defence clock time it reaches the robot
-  yaw: number; // its bearing, inside the turret's arc
+export interface Bearing {
+  yaw: number;
   pitch: number;
+}
+
+/**
+ * One incoming missile. Every missile leaves the one launcher and flies in to the robot,
+ * fanning out as it closes: its bearing moves from the launcher's to its arrival bearing,
+ * and its distance falls steadily to zero. This is a tuned stand-in for perspective, so a
+ * missile starts as a dot on the launcher and swings outward across the sky.
+ */
+export interface Missile {
+  spawn: number; // defence clock time it leaves the launcher
+  arrive: number; // defence clock time it reaches the robot
+  from: Bearing; // the launcher
+  to: Bearing; // where it arrives from, somewhere across the sky
+  launchDistance: number;
   state: "flying" | "shot" | "hit";
   resolvedAt: number | null; // when it was shot down or arrived, for the burst and flash
 }
@@ -28,11 +40,13 @@ export interface Shot {
 /** A hunter's attack. The robot holds still; the view turns within its arc and the guns fire at the aim point. */
 export interface DefenceState {
   elapsed: number; // seconds into the engagement
-  yaw: number; // where the view, and so the guns, are aimed
+  yaw: number; // where the view, and so the guns, are aimed; it starts on the launcher
   pitch: number;
+  launcher: Bearing;
   missiles: Missile[];
   shots: Shot[];
   lastShot: number; // time of the last round, for the rate of fire
+  hills: number[]; // the horizon's silhouette: heights in degrees, every HILL_STEP degrees from -HILL_SPAN
   done: boolean; // every missile has been shot down or has arrived
 }
 
@@ -42,10 +56,17 @@ export interface Aim {
   pitch: number;
 }
 
-/** The attack's missile schedule: volleys of 3 to 5, spaced out, on bearings inside the arc. All from the seed. */
+export const HILL_STEP = 4;
+export const HILL_SPAN = 100;
+
+/**
+ * The attack, all from the seed: volleys of 3 to 5 missiles from the one launcher, each
+ * arriving from its own point across the sky, and a hill silhouette for the horizon.
+ */
 export function createDefence(seed: number, cfg: Config): DefenceState {
   const d = cfg.defence;
   const rng = createRng(seed);
+  const launcher = { yaw: 0, pitch: d.launcherPitchDegrees };
   const missiles: Missile[] = [];
   for (let v = 0; v < d.volleys; v++) {
     const start = d.warningSeconds + v * d.volleyGapSeconds;
@@ -55,25 +76,41 @@ export function createDefence(seed: number, cfg: Config): DefenceState {
       missiles.push({
         spawn,
         arrive: spawn + d.missileTravelSeconds,
+        from: launcher,
         // Never beyond the arc, so every missile can be turned toward.
-        yaw: rangeFloat(rng, -1, 1) * Math.min(d.spawnYawDegrees, d.arcYawDegrees),
-        pitch: rangeFloat(rng, -1, 1) * Math.min(d.spawnPitchDegrees, d.arcPitchDegrees),
+        to: {
+          yaw: rangeFloat(rng, -1, 1) * Math.min(d.fanYawDegrees, d.arcYawDegrees),
+          pitch: rangeFloat(rng, d.fanPitchMinDegrees, Math.min(d.fanPitchMaxDegrees, d.arcPitchUpDegrees)),
+        },
+        launchDistance: d.launchDistance,
         state: "flying",
         resolvedAt: null,
       });
     }
   }
-  return { elapsed: 0, yaw: 0, pitch: 0, missiles, shots: [], lastShot: -Infinity, done: false };
+  const hills = Array.from({ length: Math.floor((2 * HILL_SPAN) / HILL_STEP) + 1 }, () => rangeFloat(rng, 0.3, 2.6));
+  return { elapsed: 0, yaw: launcher.yaw, pitch: 0, launcher, missiles, shots: [], lastShot: -Infinity, hills, done: false };
 }
 
-/** True during the warning beat before the first missile appears. */
+/** True during the warning beat before the first missile leaves the launcher. */
 export function isWarning(s: DefenceState, cfg: Config): boolean {
   return s.elapsed < cfg.defence.warningSeconds;
 }
 
-/** How far a missile is from the robot at time t: 1 when it appears, 0 when it arrives. */
+/** How far along its flight a missile is at time t: 0 on the launcher, 1 on arrival. */
+function progress(m: Missile, t: number): number {
+  return clamp((t - m.spawn) / (m.arrive - m.spawn), 0, 1);
+}
+
+/** How far a missile is from the robot at time t: the launch distance when it leaves, 0 when it arrives. */
 export function missileDistance(m: Missile, t: number): number {
-  return clamp(1 - (t - m.spawn) / (m.arrive - m.spawn), 0, 1);
+  return m.launchDistance * (1 - progress(m, t));
+}
+
+/** Where a missile is seen at time t: on the launcher at first, swinging out to its arrival bearing. */
+export function missileBearing(m: Missile, t: number): Bearing {
+  const u = progress(m, t);
+  return { yaw: m.from.yaw + (m.to.yaw - m.from.yaw) * u, pitch: m.from.pitch + (m.to.pitch - m.from.pitch) * u };
 }
 
 /** How far a round has flown at time t. */
@@ -82,23 +119,24 @@ export function shotDistance(shot: Shot, t: number, cfg: Config): number {
 }
 
 /** Angle between two bearings, in degrees. Flat approximation: fine inside a small arc. */
-export function separation(a: { yaw: number; pitch: number }, b: { yaw: number; pitch: number }): number {
+export function separation(a: Bearing, b: Bearing): number {
   return Math.hypot(a.yaw - b.yaw, a.pitch - b.pitch);
 }
 
 /**
  * One fixed step of the attack. The view turns at the turn rate and stops at the edge of
  * the arc. Holding fire sends rounds out at the rate of fire, along the current bearing.
- * A round that reaches a missile on its bearing destroys it and is spent; it takes the
- * nearest one it has reached. A missile that reaches the robot counts as a hit.
+ * A round that reaches a missile near its bearing destroys it and is spent; it takes the
+ * nearest one it has reached. A round with no hit is spent at the guns' range. A missile
+ * that reaches the robot counts as a hit.
  */
 export function stepDefence(s: DefenceState, aim: Aim, fire: boolean, dt: number, cfg: Config): DefenceState {
   if (s.done) return s;
   const d = cfg.defence;
   const elapsed = s.elapsed + dt;
   const turn = d.turnRateDegreesPerSecond * dt;
-  const yaw = clamp(s.yaw + clamp(aim.yaw, -1, 1) * turn, -d.arcYawDegrees, d.arcYawDegrees);
-  const pitch = clamp(s.pitch + clamp(aim.pitch, -1, 1) * turn, -d.arcPitchDegrees, d.arcPitchDegrees);
+  const yaw = clamp(s.yaw + clamp(aim.yaw, -1, 1) * turn, s.launcher.yaw - d.arcYawDegrees, s.launcher.yaw + d.arcYawDegrees);
+  const pitch = clamp(s.pitch + clamp(aim.pitch, -1, 1) * turn, -d.arcPitchDownDegrees, d.arcPitchUpDegrees);
 
   const missiles = s.missiles.map((m) => ({ ...m }));
   let shots = s.shots;
@@ -110,11 +148,11 @@ export function stepDefence(s: DefenceState, aim: Aim, fire: boolean, dt: number
 
   shots = shots.map((shot) => {
     if (shot.state !== "flying") return shot;
-    const reach = shotDistance(shot, elapsed, cfg);
+    const reach = Math.min(shotDistance(shot, elapsed, cfg), d.gunRange);
     let best: Missile | null = null;
     for (const m of missiles) {
       if (m.state !== "flying" || m.spawn > elapsed) continue;
-      if (separation(m, shot) > d.hitToleranceDegrees) continue;
+      if (separation(missileBearing(m, elapsed), shot) > d.hitToleranceDegrees) continue;
       const md = missileDistance(m, elapsed);
       if (md <= reach && (best === null || md < missileDistance(best, elapsed))) best = m;
     }
@@ -123,7 +161,7 @@ export function stepDefence(s: DefenceState, aim: Aim, fire: boolean, dt: number
       best.resolvedAt = elapsed;
       return { ...shot, state: "spent" as const };
     }
-    return reach > 1 ? { ...shot, state: "spent" as const } : shot;
+    return shotDistance(shot, elapsed, cfg) > d.gunRange ? { ...shot, state: "spent" as const } : shot;
   });
 
   for (const m of missiles) {
@@ -133,7 +171,7 @@ export function stepDefence(s: DefenceState, aim: Aim, fire: boolean, dt: number
     }
   }
   const done = missiles.every((m) => m.state !== "flying");
-  return { elapsed, yaw, pitch, missiles, shots, lastShot, done };
+  return { ...s, elapsed, yaw, pitch, missiles, shots, lastShot, done };
 }
 
 /** Missiles that got through: each one is a hit on the shields. */

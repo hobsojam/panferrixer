@@ -98,16 +98,22 @@ export const config = {
     volleyGapSeconds: 2.8, // time between volley starts
     missileSpacingSeconds: 0.15, // between missiles in one volley
     missileTravelSeconds: 2.2, // from launch to arrival
-    // The turret (design-notes 4.8): the view turns within a limited forward arc, and every
-    // missile comes from inside it. Widen the arc toward free aiming, narrow it toward fixed.
-    arcYawDegrees: 45, // the view can turn this far left or right of straight ahead
-    arcPitchDegrees: 25, // and this far up or down
+    // The turret (design-notes 4.8): the view turns within a limited forward arc. Widen the
+    // arc toward free aiming, narrow it toward fixed. The view starts facing the launcher.
+    arcYawDegrees: 45, // the view can turn this far left or right of the launcher
+    arcPitchUpDegrees: 25, // this far up
+    arcPitchDownDegrees: 5, // and only this far below the horizon: nothing comes from the ground
     viewYawDegrees: 28, // half the visible field across; missiles beyond it are off screen
-    // Where missiles come from: inside the arc, and mostly in view, so only some start just off screen.
-    spawnYawDegrees: 34,
-    spawnPitchDegrees: 20,
+    // A strike from a single enemy: every missile leaves one launcher on the horizon, straight
+    // ahead, and fans out as it closes, arriving from somewhere across the sky.
+    launcherPitchDegrees: 0.5, // the launcher sits just on the horizon
+    launchDistance: 1.5, // where missiles start; beyond the guns' range, so the launcher cannot be camped
+    gunRange: 1, // a round with no hit is spent at this distance
+    fanYawDegrees: 34, // how far left or right of the launcher a missile can arrive
+    fanPitchMinDegrees: 3, // arrival height range above the horizon: missiles come from the sky
+    fanPitchMaxDegrees: 16,
     turnRateDegreesPerSecond: 80, // the difficulty dial: caps keys and mouse alike
-    shotSpeed: 1.6, // distance per second; a missile appears at distance 1, the guns' range
+    shotSpeed: 1.6, // distance per second, in the same units as gunRange and launchDistance
     fireIntervalSeconds: 0.12, // rate of fire while fire is held
     hitToleranceDegrees: 3.5, // how close to a missile's bearing a round must pass to destroy it
   },
