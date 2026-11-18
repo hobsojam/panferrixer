@@ -116,6 +116,7 @@ export const config = {
     shotSpeed: 1.6, // distance per second, in the same units as gunRange and launchDistance
     fireIntervalSeconds: 0.12, // rate of fire while fire is held
     hitToleranceDegrees: 3.5, // how close to a missile's bearing a round must pass to destroy it
+    mouseDegreesPerPixel: 0.12, // mouse sensitivity while the pointer is captured; still capped by the turn rate
   },
 
   terminalPhase: {

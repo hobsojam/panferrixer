@@ -15,7 +15,7 @@ type Project = (yaw: number, pitch: number) => [number, number];
  * stars converging on the aim point. A heading strip along the top shows the arc, the
  * launcher and every missile. Pure drawing: reads state, never changes it.
  */
-export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, shieldPlates: number, cfg: Config): void {
+export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, shieldPlates: number, cfg: Config, mouseLocked = false): void {
   const { width: w, height: h } = cfg.canvas;
   const c = cfg.colors;
   const pxPerDegree = w / 2 / cfg.defence.viewYawDegrees;
@@ -112,7 +112,7 @@ export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, sh
   ctx.textAlign = "right";
   ctx.fillText(`SHIELDS ${shieldPlates} PLATES`, w - 20, 18);
   ctx.textAlign = "center";
-  ctx.fillText("ARROWS AIM     HOLD SPACE FIRE", w / 2, h - 28);
+  ctx.fillText(mouseLocked ? "MOUSE AIMS     HOLD BUTTON FIRE     ESC RELEASES" : "ARROWS AIM     HOLD SPACE FIRE     CLICK TO AIM WITH THE MOUSE", w / 2, h - 28);
 
   ctx.strokeStyle = c.frame;
   ctx.lineWidth = 4;

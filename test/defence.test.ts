@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
 import { alertHunters, applyShieldHits, createDashboardState, hunterInRange, isShielded, networkOf, stepDashboard, worldFor, type DashboardState } from "../src/dashboard";
-import { createDefence, hitCount, isWarning, missileBearing, missileDistance, stepDefence, type DefenceState, type Missile } from "../src/defence";
+import { combineAim, createDefence, hitCount, isWarning, missileBearing, missileDistance, mouseAim, stepDefence, type DefenceState, type Missile } from "../src/defence";
 
 const DT = 1 / 60;
 const world = worldFor(config);
@@ -304,5 +304,27 @@ describe("scans", () => {
     const start = { ...createDashboardState(config), row: 0, col: 1, pos: { x: hunter.col, y: hunter.row } };
     const scanned = stepDashboard(start, ["activate"], DT, world).state;
     expect(scanned.alerted.length).toBeGreaterThan(0);
+  });
+});
+
+describe("mouse aiming", () => {
+  const most = config.defence.turnRateDegreesPerSecond * DT;
+
+  it("a small movement turns by its degrees, as a fraction of the step's turn", () => {
+    const pixels = most / 2 / config.defence.mouseDegreesPerPixel;
+    expect(mouseAim(pixels, 0, DT, config).yaw).toBeCloseTo(0.5);
+  });
+
+  it("moving the mouse up aims up", () => {
+    expect(mouseAim(0, -1, DT, config).pitch).toBeGreaterThan(0);
+  });
+
+  it("a big flick is capped at the turn rate, so the mouse never out-turns the keys", () => {
+    expect(mouseAim(10000, -10000, DT, config)).toEqual({ yaw: 1, pitch: 1 });
+  });
+
+  it("keys and mouse together are still capped", () => {
+    expect(combineAim({ yaw: 1, pitch: -1 }, { yaw: 0.6, pitch: -0.6 })).toEqual({ yaw: 1, pitch: -1 });
+    expect(combineAim({ yaw: 1, pitch: 0 }, { yaw: -0.25, pitch: 0.5 })).toEqual({ yaw: 0.75, pitch: 0.5 });
   });
 });

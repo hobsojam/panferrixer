@@ -182,3 +182,20 @@ export function hitCount(s: DefenceState): number {
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
+
+/**
+ * Mouse movement as turning input for one step. The mouse asks for a turn in degrees;
+ * it is expressed as a fraction of what the turn rate allows this step, and capped at
+ * full deflection, so the mouse turns no faster than the keys (design-notes 4.8).
+ * Moving the mouse up aims up.
+ */
+export function mouseAim(dxPixels: number, dyPixels: number, dt: number, cfg: Config): Aim {
+  const most = cfg.defence.turnRateDegreesPerSecond * dt;
+  const perPixel = cfg.defence.mouseDegreesPerPixel;
+  return { yaw: clamp((dxPixels * perPixel) / most, -1, 1), pitch: clamp((-dyPixels * perPixel) / most, -1, 1) };
+}
+
+/** Keys and mouse together, still capped at full deflection. */
+export function combineAim(a: Aim, b: Aim): Aim {
+  return { yaw: clamp(a.yaw + b.yaw, -1, 1), pitch: clamp(a.pitch + b.pitch, -1, 1) };
+}

@@ -2,6 +2,7 @@ import { createAppState, updateApp, type AppState } from "./app";
 import { config } from "./config";
 import type { Action } from "./dashboard";
 import { renderDashboard } from "./dashboard-render";
+import { combineAim, mouseAim } from "./defence";
 import { renderDefence } from "./defence-render";
 import { InputController } from "./input";
 import { render } from "./render";
@@ -22,6 +23,11 @@ function newSeed(): number {
 
 let state: AppState = createAppState(config);
 
+// The mouse aims the defence turret once captured, which a browser only allows from a click.
+canvas.addEventListener("click", () => {
+  if (state.screen === "defence") input.lockPointer(canvas);
+});
+
 const fixedDt = config.simulation.fixedDtSeconds;
 let accumulator = 0;
 let lastTime = performance.now();
@@ -34,18 +40,25 @@ function frame(now: number): void {
   pending.push(...input.consumeActions());
   if (input.consumeMute()) sound.toggleMute();
 
+  // This frame's mouse movement is shared across its fixed steps, so turning is smooth.
+  const steps = Math.floor(accumulator / fixedDt);
+  // On a fast display some frames run no step; their movement waits for the next one.
+  const mouse = steps > 0 ? input.consumeMouse() : { dx: 0, dy: 0 };
   while (accumulator >= fixedDt) {
     const before = state;
-    state = updateApp(state, { actions: pending, steering: input.getSteering(), aim: input.getAim(), fire: input.isFireHeld() }, fixedDt, config, newSeed);
+    const aim = combineAim(input.getAim(), mouseAim(mouse.dx / steps, mouse.dy / steps, fixedDt, config));
+    state = updateApp(state, { actions: pending, steering: input.getSteering(), aim, fire: input.isFireHeld() }, fixedDt, config, newSeed);
     for (const event of eventsBetween(before, state, config)) sound.play(event);
     pending = [];
     accumulator -= fixedDt;
   }
+  // The pointer is only captured during an attack: hand it back when the attack ends.
+  if (state.screen !== "defence") input.releasePointer();
 
   if (state.screen === "dashboard") {
     renderDashboard(ctx!, state.dashboard, config, !sound.isMuted());
   } else if (state.screen === "defence") {
-    renderDefence(ctx!, state.defence, state.dashboard.shieldPlates, config);
+    renderDefence(ctx!, state.defence, state.dashboard.shieldPlates, config, input.isPointerLocked());
   } else {
     render(ctx!, state.flight, config, state.target.kind, state.shielded);
   }
