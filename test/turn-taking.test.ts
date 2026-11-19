@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { dashboardOf } from "./helpers";
 import { updateApp, type AppInput, type AppState } from "../src/app";
 import { config } from "../src/config";
 import {
@@ -57,7 +58,7 @@ describe("time stops while a chooser is open", () => {
     let s: AppState = choosing;
     for (let i = 0; i < 120; i++) s = updateApp(s, idle, DT, config, () => 5);
     expect(s.screen).toBe("dashboard");
-    expect(positionOf(s.dashboard, hunterIndex, world)).toEqual({ x: post.x + 3, y: post.y });
+    expect(positionOf(dashboardOf(s), hunterIndex, world)).toEqual({ x: post.x + 3, y: post.y });
     // Closing the chooser lets time run again, and the attack comes.
     s = updateApp(s, { ...idle, actions: ["cancel"] }, DT, config, () => 5);
     s = updateApp(s, idle, DT, config, () => 5);
@@ -71,10 +72,11 @@ describe("a breather after each incoming attack", () => {
     expect(s.screen).toBe("defence");
     for (let i = 0; i < 60 * 30 && s.screen === "defence"; i++) s = updateApp(s, idle, DT, config, () => 5);
     expect(s.screen).toBe("dashboard");
-    expect(s.dashboard.breatherUntil).toBeCloseTo(s.dashboard.time + config.dashboard.attackBreatherSeconds);
+    expect(dashboardOf(s).breatherUntil).toBeCloseTo(dashboardOf(s).time + config.dashboard.attackBreatherSeconds);
     // A second hunter, ready and in range, still has to wait.
     const other = world.targets.findIndex((t, i) => t.kind === "hunter" && i !== hunterIndex);
-    const crowded = { ...s.dashboard, alerted: [...s.dashboard.alerted, other], hunterPos: { ...s.dashboard.hunterPos, [other]: { ...s.dashboard.pos } } };
+    const d = dashboardOf(s);
+    const crowded = { ...d, alerted: [...d.alerted, other], hunterPos: { ...d.hunterPos, [other]: { ...d.pos } } };
     expect(hunterInRange(crowded, world, range)).toBeNull();
     expect(hunterInRange({ ...crowded, time: crowded.breatherUntil }, world, range)).not.toBeNull();
   });

@@ -4,6 +4,7 @@ import { worldFor, type Action } from "./dashboard";
 import { renderDashboard } from "./dashboard-render";
 import { combineAim, mouseAim } from "./defence";
 import { renderDefence } from "./defence-render";
+import { renderDestroyed } from "./destroyed-render";
 import { InputController } from "./input";
 import { createInputGate, gateInput } from "./input-gate";
 import { render } from "./render";
@@ -70,6 +71,8 @@ function frame(now: number): void {
     renderDashboard(ctx!, state.dashboard, config, !sound.isMuted());
   } else if (state.screen === "defence") {
     renderDefence(ctx!, state.defence, shieldsDuringAttack(state.dashboard, state.defence, config), config, input.isPointerLocked(), attackerName(state.attacker));
+  } else if (state.screen === "destroyed") {
+    renderDestroyed(ctx!, state.elapsed, state.seed, config);
   } else {
     render(ctx!, state.flight, config, state.target.kind, state.shielded);
   }

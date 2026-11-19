@@ -130,7 +130,7 @@ Very high scores (for example 96% in one Spectrum review). Praise: depth, the wi
 14. Controls: arrow keys, or possibly the mouse. The original used a joystick, which is rare on Windows laptops.
 15. Inbound attacks cannot occur during an outbound missile flight. There is no in-game reason and the design should not try to handwave one; it simply does not happen.
 16. Attack length and damage per missile depend on the enemy. A standard enemy is about 10 seconds with fairly low damage. No attack should last more than about a minute, because longer gets boring or frustrating. A damage model has not been discussed in full yet.
-17. Zero shields is death. Without a real failure state it is not a game but a walking simulator.
+17. Zero shields is death. Without a real failure state it is not a game but a walking simulator. **As built (#41):** the robot is destroyed the moment its last plate breaks, mid-attack; a "ROBOT DESTROYED" screen shows the wreck for 2 seconds, then Space starts a new game from the beginning (decided, author: there are no saves yet; a save select may come once saving exists, item 19).
 18. Zero energy is also death, or at least immobilisation (death unless energy can be picked up nearby).
 19. Saving (agreed): death means reloading the last save. The player can save at any time the robot is not threatened (as in the original), plus an autosave whenever a piece is collected, so a death never costs more than the stretch since the last upgrade. No saving while threatened.
 20. Shields recharge while the robot stands still and is not threatened, paid for in energy. Only damaged plates recharge; lost plates need an armour pickup (agreed, section 4.9).

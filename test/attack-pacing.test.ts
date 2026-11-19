@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { dashboardOf } from "./helpers";
 import { updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
 import { createDashboardState, stepDashboard, worldFor, type DashboardState } from "../src/dashboard";
@@ -29,7 +30,7 @@ describe("first attack after an alert", () => {
     // On the Scan verb, standing on the hunter's post.
     const start: AppState = { screen: "dashboard", dashboard: { ...createDashboardState(config), col: 1, pos: { x: hunter.col, y: hunter.row } } };
     const scanned = updateApp(start, { actions: ["activate"], steering: 0 }, DT, config, () => 5);
-    expect(scanned.screen).toBe("dashboard");
+    if (scanned.screen !== "dashboard") throw new Error("expected dashboard");
     expect(scanned.dashboard.alerted).toContain(hunterIndex);
     const wait = scanned.dashboard.hunterReadyAt[hunterIndex] - scanned.dashboard.time;
     expect(wait).toBeGreaterThanOrEqual(config.dashboard.hunterFirstAttackDelayMin - DT);
@@ -75,7 +76,7 @@ describe("range shapes the outbound strike", () => {
   });
 
   it("firing at a near target launches a shorter flight than at a far one", () => {
-    const near = { ...besideAlertedHunter().dashboard, alerted: [] };
+    const near = { ...dashboardOf(besideAlertedHunter()), alerted: [] };
     const fired = updateApp({ screen: "dashboard", dashboard: { ...near, row: 1, col: 0 } }, { actions: ["activate"], steering: 0 }, DT, config, () => 5);
     expect(fired.screen).toBe("dashboard"); // targeting is open now
     const launched = updateApp(fired, { actions: ["activate"], steering: 0 }, DT, config, () => 5);

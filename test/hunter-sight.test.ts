@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { dashboardOf } from "./helpers";
 import { createAppState, updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
 import {
@@ -58,7 +59,7 @@ describe("the start position", () => {
     let s: AppState = createAppState(config);
     for (let i = 0; i < 10 / DT; i++) s = updateApp(s, { actions: [], steering: 0 }, DT, config, () => 1);
     expect(s.screen).toBe("dashboard");
-    expect(s.dashboard.alerted).toEqual([]);
+    expect(dashboardOf(s).alerted).toEqual([]);
   });
 });
 
