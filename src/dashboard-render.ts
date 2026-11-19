@@ -415,18 +415,21 @@ function drawFullMap(
   }
   ctx.globalAlpha = 1;
 
-  // One ring per network (a network is a town). Its buildings and enemies are local-map detail.
+  // One ring per network (a network is a town), drawn at the town's real extent so it reads
+  // as a place the robot can walk into. Its buildings and enemies are local-map detail.
   // A network whose power is cut shows a dashed ring in the shield colour until it comes back.
   world.towns.forEach((town, network) => {
     const [tx, ty] = toScreen(town.x, town.y);
     const down = isSuppressed(state, network);
     ctx.strokeStyle = down ? c.shield : c.text;
+    ctx.globalAlpha = down ? 1 : 0.7;
     ctx.lineWidth = 1;
-    ctx.setLineDash(down ? [2, 2] : []);
+    ctx.setLineDash(down ? [3, 3] : []);
     ctx.beginPath();
-    ctx.arc(tx, ty, 3.5, 0, Math.PI * 2);
+    ctx.ellipse(tx, ty, world.townRadiusCols * cellW, world.townRadiusRows * cellH, 0, 0, Math.PI * 2);
     ctx.stroke();
   });
+  ctx.globalAlpha = 1;
   ctx.setLineDash([]);
 
   if (isPaused(state)) drawTimeStopped(ctx, x, y, w, h, cfg);
@@ -452,7 +455,7 @@ function drawFullMap(
 
   const [rx, ry] = toScreen(state.pos.x, state.pos.y);
   drawPulse(ctx, state, world, cfg, toScreen, world.scanRadius * cellW, world.scanRadius * cellH, [x, y, w, h]);
-  drawRobot(ctx, rx, ry, state.time, c.panelSelected);
+  drawRobot(ctx, rx, ry, state.time, c.panelSelected, FULL_MAP_ROBOT_SCALE);
 
   drawText(ctx, "FULL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
 }
@@ -470,19 +473,26 @@ function drawCross(ctx: CanvasRenderingContext2D, cx: number, cy: number, color:
   });
 }
 
-function drawRobot(ctx: CanvasRenderingContext2D, mx: number, my: number, time: number, color: string): void {
-  const pulse = 1.2 * Math.sin(time * 4);
-  drawGlow(ctx, color, 6, () => {
+/**
+ * The robot's marker on the full map, as a fraction of its local-view size. A full-map cell is
+ * about 3 pixels, so at local size the marker covered five cells and outsized the town rings.
+ */
+const FULL_MAP_ROBOT_SCALE = 0.5;
+
+/** The robot: a pulsing ring round a pointer. `scale` shrinks it for the full map. */
+function drawRobot(ctx: CanvasRenderingContext2D, mx: number, my: number, time: number, color: string, scale = 1): void {
+  const pulse = 1.2 * scale * Math.sin(time * 4);
+  drawGlow(ctx, color, 6 * scale, () => {
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.5 * Math.max(scale, 0.75);
     ctx.beginPath();
-    ctx.arc(mx, my, 7 + pulse, 0, Math.PI * 2);
+    ctx.arc(mx, my, 7 * scale + pulse, 0, Math.PI * 2);
     ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(mx, my - 4);
-    ctx.lineTo(mx + 3, my + 3);
-    ctx.lineTo(mx - 3, my + 3);
+    ctx.moveTo(mx, my - 4 * scale);
+    ctx.lineTo(mx + 3 * scale, my + 3 * scale);
+    ctx.lineTo(mx - 3 * scale, my + 3 * scale);
     ctx.closePath();
     ctx.fill();
   });
