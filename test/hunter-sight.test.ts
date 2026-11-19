@@ -4,12 +4,10 @@ import { config } from "../src/config";
 import {
   alertHunters,
   createDashboardState,
-  investigateOutage,
   moveHunters,
   positionOf,
   scanWakeChance,
   startPosition,
-  stepDashboard,
   worldFor,
   type DashboardState,
   type World,
@@ -17,13 +15,12 @@ import {
 import { generateWorld, inTown } from "../src/local-map";
 import { cellKey, findRoute, isPassable } from "../src/route";
 
-// Hunter sight, investigation and the start position: design-notes 4.3, 4.7 and 4.10.
+// Hunter sight and the start position: design-notes 4.7 and 4.10. The outage patrol is in outage-patrol.test.ts.
 const DT = 1 / 60;
 const world = worldFor(config);
 const hunterIndex = world.targets.findIndex((t) => t.kind === "hunter");
 const hunter = world.targets[hunterIndex];
 const post = { x: hunter.col, y: hunter.row };
-const FAR = { x: -100, y: -100 }; // a robot nobody can see
 
 function run(s: DashboardState, seconds: number, w: World = world): DashboardState {
   let state = s;
@@ -76,51 +73,6 @@ describe("hunters are always looking", () => {
   it("but not from further away", () => {
     const apart = { ...createDashboardState(config), pos: { x: post.x + config.dashboard.hunterSightCells + 0.5, y: post.y } };
     expect(moveHunters(apart, world, DT).alerted).not.toContain(hunterIndex);
-  });
-});
-
-describe("cutting power sends the hunter to investigate", () => {
-  const station = world.targets.find((t) => t.kind === "power" && t.network === hunter.network)!;
-  const stationIndex = world.targets.indexOf(station);
-  const alone: DashboardState = { ...createDashboardState(config), pos: FAR };
-
-  it("Grid Disable on a station sends that network's hunter, and only that one", () => {
-    const choosing: DashboardState = { ...alone, mode: "targeting", purpose: "gridDisable", target: stationIndex };
-    const cut = stepDashboard(choosing, ["activate"], DT, world).state;
-    expect(Object.keys(cut.investigating).map(Number)).toEqual([hunterIndex]);
-    const search = cut.investigating[hunterIndex];
-    expect(Math.abs(search.x - station.col) + Math.abs(search.y - station.row)).toBe(1); // beside the station
-    expect(search.until).toBeNull();
-  });
-
-  it("the hunter walks there, searches for a while, then goes home", () => {
-    const sent = investigateOutage(alone, station, world);
-    const search = sent.investigating[hunterIndex];
-    const arrived = run(sent, 5); // a few cells away, so it is there well before its search ends
-    expect(positionOf(arrived, hunterIndex, world)).toEqual({ x: search.x, y: search.y });
-    expect(arrived.investigating[hunterIndex].until).not.toBeNull();
-    const done = run(arrived, config.dashboard.hunterInvestigateSeconds + 15);
-    expect(done.investigating[hunterIndex]).toBeUndefined();
-    expect(positionOf(done, hunterIndex, world)).toEqual(post);
-  });
-
-  it("seeing the robot on the way ends the search and alerts it", () => {
-    const sent = investigateOutage(alone, station, world);
-    const search = sent.investigating[hunterIndex];
-    const inTheWay = { ...sent, pos: { x: search.x, y: search.y } };
-    const spotted = run(inTheWay, 4);
-    expect(spotted.alerted).toContain(hunterIndex);
-    expect(spotted.investigating[hunterIndex]).toBeUndefined();
-  });
-
-  it("an alerted hunter ignores the outage", () => {
-    const chasing = { ...alone, alerted: [hunterIndex] };
-    expect(investigateOutage(chasing, station, world).investigating).toEqual({});
-  });
-
-  it("a destroyed hunter is not sent", () => {
-    const dead = { ...alone, ruins: [hunterIndex] };
-    expect(investigateOutage(dead, station, world).investigating).toEqual({});
   });
 });
 

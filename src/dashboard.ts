@@ -64,7 +64,6 @@ export interface World {
   hunterFirstAttackDelayMax: number;
   hunterSightCells: number; // a hunter this close to the robot sees it (design-notes 4.10)
   hunterHoldCells: number; // an alerted hunter closes to this range, then holds
-  hunterInvestigateSeconds: number; // how long a hunter searches where it was sent
   viewCols: number; // the mini map's local window, in cells: also the reach of the robot's equipment
   viewRows: number;
 }
@@ -99,9 +98,9 @@ export interface DashboardState {
   hunterPos: Record<number, Point>;
   // Dashboard time at which each hunter can attack again.
   hunterReadyAt: Record<number, number>;
-  // Hunters sent to look at a place, such as a cut power station: where, and when the search
-  // ends (null until it arrives). Missing means it is not investigating.
-  investigating: Record<number, Errand>;
+  // Hunters making rounds of their network's domes while its power is cut (design-notes 4.3).
+  // Missing means it is not patrolling.
+  patrolling: Record<number, Patrol>;
   // Hunters that have used their magazine and gone to rearm: where, and when rearming ends.
   rearming: Record<number, Errand>;
   // Attacks each hunter has made from its current magazine.
@@ -112,11 +111,22 @@ export interface DashboardState {
   shieldHits: number;
 }
 
-/** A hunter sent somewhere (to search, or to rearm): it walks there, stays a while, then goes home. */
+/** A hunter sent to rearm: it walks there, stays a while, then goes home. */
 export interface Errand {
   x: number;
   y: number;
   until: number | null;
+}
+
+/**
+ * A hunter's rounds while its network's power is cut: it checks each intact dome in turn,
+ * nearest first, and goes home when the power comes back.
+ */
+export interface Patrol {
+  until: number; // dashboard time the power comes back
+  stop: number | null; // target index of the building it is walking to
+  at: Point | null; // the free cell beside that building it is heading for
+  checked: number[]; // buildings already checked this round
 }
 
 export interface DashboardStep {
@@ -154,7 +164,6 @@ export function worldFor(cfg: Config): World {
       hunterFirstAttackDelayMax: cfg.dashboard.hunterFirstAttackDelayMax,
       hunterSightCells: cfg.dashboard.hunterSightCells,
       hunterHoldCells: cfg.dashboard.hunterHoldCells,
-      hunterInvestigateSeconds: cfg.dashboard.hunterInvestigateSeconds,
       viewCols: cfg.localMap.viewCols,
       viewRows: cfg.localMap.viewRows,
     };
@@ -188,7 +197,7 @@ export function createDashboardState(cfg: Config): DashboardState {
     alerted: [],
     hunterPos: {},
     hunterReadyAt: {},
-    investigating: {},
+    patrolling: {},
     rearming: {},
     attacksUsed: {},
     breatherUntil: 0,
@@ -324,23 +333,23 @@ export function routeTo(s: DashboardState, cell: Cross, world: World): Point[] |
 
 /**
  * Hunters that have just noticed the robot become alerted: each waits a moment before its
- * first attack, and drops any search it was on.
+ * first attack, and drops any patrol it was on.
  */
 export function alertTo(s: DashboardState, indices: readonly number[], world: World): DashboardState {
   // A hunter withdrawing to rearm has nothing to attack with, and does not turn back.
   const fresh = indices.filter((i) => !s.alerted.includes(i) && !s.rearming[i]);
   if (fresh.length === 0) return s;
-  const investigating = { ...s.investigating };
-  for (const i of fresh) delete investigating[i];
-  return { ...s, alerted: [...s.alerted, ...fresh], hunterReadyAt: delayFirstAttacks(s, fresh, world), investigating };
+  const patrolling = { ...s.patrolling };
+  for (const i of fresh) delete patrolling[i];
+  return { ...s, alerted: [...s.alerted, ...fresh], hunterReadyAt: delayFirstAttacks(s, fresh, world), patrolling };
 }
 
 /**
  * Moves the hunters (design-notes 4.10). Every hunter is always looking: one that comes
  * within sight of the robot is alerted, whatever it was doing. An alerted hunter closes
  * to its preferred range and holds there while it attacks, and breaks off once the robot
- * is beyond its leash. A hunter sent to investigate walks there, searches for a while,
- * then goes home. A hunter that has used its magazine withdraws to a dome, rearms, then
+ * is beyond its leash. While its network's power is cut, a hunter makes rounds of the
+ * network's domes, then goes home when the power returns. A hunter that has used its magazine withdraws to a dome, rearms, then
  * goes home no longer alerted. Otherwise it walks back to its post. A destroyed hunter
  * does not move.
  */
@@ -356,7 +365,18 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
     }
     const alerted = next.alerted.includes(index);
     const rearm = next.rearming[index];
-    const search = alerted || rearm ? undefined : next.investigating[index];
+    let patrol = alerted || rearm ? undefined : next.patrolling[index];
+    if (patrol && next.time >= patrol.until) {
+      // The power is back: the rounds are over.
+      const patrolling = { ...next.patrolling };
+      delete patrolling[index];
+      next = { ...next, patrolling };
+      patrol = undefined;
+    }
+    if (patrol && (patrol.at === null || (here.x === patrol.at.x && here.y === patrol.at.y))) {
+      patrol = nextStop(next, index, patrol, world);
+      next = { ...next, patrolling: { ...next.patrolling, [index]: patrol } };
+    }
 
     let goal: Point;
     if (rearm) {
@@ -379,26 +399,16 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
       const inside = buildingCells(next, world).has(cellKey(world.map, Math.round(here.x), Math.round(here.y)));
       if (distanceTo(next.pos, here.x, here.y) <= world.hunterHoldCells && !inside) return;
       goal = { x: Math.round(next.pos.x), y: Math.round(next.pos.y) };
-    } else if (search) {
-      if (here.x === search.x && here.y === search.y) {
-        // Arrived: search for a while, then give up and go home.
-        if (search.until === null) {
-          next = { ...next, investigating: { ...next.investigating, [index]: { ...search, until: next.time + world.hunterInvestigateSeconds } } };
-        } else if (next.time >= search.until) {
-          const investigating = { ...next.investigating };
-          delete investigating[index];
-          next = { ...next, investigating };
-        }
-        return;
-      }
-      goal = { x: search.x, y: search.y };
+    } else if (patrol?.at) {
+      if (here.x === patrol.at.x && here.y === patrol.at.y) return; // its only stop: wait there
+      goal = patrol.at;
     } else {
       if (here.x === post.x && here.y === post.y) return;
       goal = post;
     }
     // Enemies may pass through buildings but never stop on one (design-notes 4.7), and never
     // cross high ground. Every goal is open ground: the robot cannot stand on a building, a
-    // post is never one, and a search or rearm point is a free cell beside a building that
+    // post is never one, and a patrol stop or rearm point is a free cell beside a building that
     // the hunter can walk to. A goal across high ground is approached as near as the hunter
     // can get, and tried again on the next step.
     const pos = stepToward(here, goal, world.map, world.hunterSpeed * dt);
@@ -408,21 +418,65 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
 }
 
 /**
- * Cutting a power station is noticed at the station, not at the robot (design-notes 4.3):
- * the network's hunter is sent to look, at the free cell beside the station nearest to it.
- * A hunter already chasing the robot ignores the outage, and so does one that high ground
- * cuts off from the station.
+ * Cutting a power station is noticed at the station, not at the robot (design-notes 4.3).
+ * The network knows something is wrong but not where, so its hunter leaves its post and
+ * makes rounds of the network's domes until the power comes back. A hunter already chasing
+ * the robot ignores the outage, and a destroyed one cannot respond. Cutting the power again
+ * while it is down only extends the rounds.
  */
-export function investigateOutage(s: DashboardState, station: Target, world: World): DashboardState {
-  const index = world.targets.findIndex((t) => t.kind === "hunter" && t.network === station.network);
+export function patrolOutage(s: DashboardState, network: number, world: World): DashboardState {
+  const index = world.targets.findIndex((t) => t.kind === "hunter" && t.network === network);
   if (index === -1 || s.ruins.includes(index) || s.alerted.includes(index)) return s;
-  const blocked = buildingCells(s, world);
+  const until = s.suppressedUntil[network] ?? s.time;
+  const current = s.patrolling[index];
+  const patrol: Patrol = current ? { ...current, until } : { until, stop: null, at: null, checked: [] };
+  return { ...s, patrolling: { ...s.patrolling, [index]: patrol } };
+}
+
+/**
+ * The buildings a hunter checks on its rounds: every intact dome in its network, or the
+ * power station if the network has no dome left.
+ */
+function patrolBuildings(s: DashboardState, network: number, world: World): number[] {
+  const inNetwork = (kind: Target["kind"]) =>
+    world.targets
+      .map((t, i) => ({ t, i }))
+      .filter(({ t, i }) => t.kind === kind && t.network === network && !s.ruins.includes(i))
+      .map(({ i }) => i);
+  const domes = inNetwork("dome");
+  return domes.length > 0 ? domes : inNetwork("power");
+}
+
+/**
+ * The hunter's next stop: the nearest building it has not checked this round that it can walk
+ * to. Once it has checked them all, a new round starts. With only one building it stays there.
+ * A building cut off by high ground is passed over; with none it can reach, it has no stop
+ * and goes home.
+ */
+function nextStop(s: DashboardState, index: number, patrol: Patrol, world: World): Patrol {
   const here = positionOf(s, index, world);
-  const beside = OFFSETS.map(([dx, dy]) => ({ x: station.col + dx, y: station.row + dy }))
-    .filter((c) => isPassable(world.map, c.x, c.y, blocked) && canWalk(here, c, world.map))
-    .sort((a, b) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(b.x - here.x, b.y - here.y));
-  if (beside.length === 0) return s;
-  return { ...s, investigating: { ...s.investigating, [index]: { ...beside[0], until: null } } };
+  const blocked = buildingCells(s, world);
+  const byDistance = (a: Point, b: Point) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(b.x - here.x, b.y - here.y);
+  // Each building it can walk to, with the free cell beside it nearest the hunter.
+  const reachable = patrolBuildings(s, world.targets[index].network, world)
+    .map((i) => {
+      const t = world.targets[i];
+      const beside = OFFSETS.map(([dx, dy]) => ({ x: t.col + dx, y: t.row + dy }))
+        .filter((c) => isPassable(world.map, c.x, c.y, blocked) && canWalk(here, c, world.map))
+        .sort(byDistance);
+      return { i, at: beside[0], p: { x: t.col, y: t.row } };
+    })
+    .filter((r): r is { i: number; at: Point; p: Point } => r.at !== undefined)
+    .sort((a, b) => byDistance(a.p, b.p));
+  if (reachable.length === 0) return { ...patrol, stop: null, at: null, checked: [] };
+  let checked = patrol.stop === null ? patrol.checked : [...patrol.checked, patrol.stop];
+  let candidates = reachable.filter((r) => !checked.includes(r.i));
+  if (candidates.length === 0) {
+    // Round complete: start again, but not at the building it is standing beside.
+    checked = [];
+    candidates = reachable.length > 1 ? reachable.filter((r) => r.i !== patrol.stop) : reachable;
+  }
+  return { ...patrol, stop: candidates[0].i, at: candidates[0].at, checked };
 }
 
 /**
@@ -569,9 +623,9 @@ export function stepDashboard(state: DashboardState, actions: readonly Action[],
     } else if (action === "activate") {
       if (s.target !== null && s.purpose === "gridDisable") {
         // Cutting power at a station takes down its network's shields, then starts the cooldown.
-        // The network notices: its hunter is sent to look at the station.
+        // The network notices: its hunter makes rounds of the domes while the power is down.
         const station = world.targets[s.target];
-        const opened = investigateOutage(openWindow(s, networkOf(station), world), station, world);
+        const opened = patrolOutage(openWindow(s, networkOf(station), world), networkOf(station), world);
         s = { ...opened, mode: "browse", target: null, gridReadyAt: s.time + world.gridDisableCooldownSeconds };
       } else if (s.target !== null) {
         fire = world.targets[s.target];

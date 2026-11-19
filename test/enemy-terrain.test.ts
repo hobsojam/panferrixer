@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
-import { createDashboardState, investigateOutage, moveHunters, positionOf, spendAttack, worldFor, type DashboardState, type World } from "../src/dashboard";
+import { createDashboardState, moveHunters, positionOf, spendAttack, worldFor, type DashboardState, type World } from "../src/dashboard";
 import { reachableGoal, stepToward } from "../src/enemy-move";
 import { generateWorld, type LocalMap, type Target } from "../src/local-map";
 import { cellKey, reachableFrom } from "../src/route";
@@ -115,24 +115,6 @@ describe("hunters and high ground", () => {
     const s: DashboardState = { ...createDashboardState(config), pos: { x: 100, y: 100 }, hunterPos: { 0: { x: 9, y: 1 } } };
     const later = run(s, world, 15);
     expect(positionOf(later, 0, world)).toEqual({ x: 2, y: 1 });
-  });
-
-  it("does not investigate a power station that high ground cuts it off from", () => {
-    const station: Target = { col: 11, row: 3, kind: "power", hasDrop: false, network: 0 };
-    const world = worldOn(sealed, [hunterAt(2, 1), station]);
-    const s = { ...createDashboardState(config), pos: { x: 100, y: 100 } };
-    expect(investigateOutage(s, station, world).investigating).toEqual({});
-  });
-
-  it("investigates a power station from the far side once there is a way round", () => {
-    // The station sits against the wall: (7, 3) is high ground, so every free cell beside it is
-    // on the far side. Sealed, the hunter cannot get there; with a gap below, it can.
-    const station: Target = { col: 8, row: 3, kind: "power", hasDrop: false, network: 0 };
-    const s = { ...createDashboardState(config), pos: { x: 100, y: 100 } };
-    expect(investigateOutage(s, station, worldOn(sealed, [hunterAt(2, 3), station])).investigating).toEqual({});
-    const spot = investigateOutage(s, station, worldOn(gapped, [hunterAt(2, 3), station])).investigating[0];
-    expect(spot.x).toBeGreaterThan(7);
-    expect(Math.abs(spot.x - station.col) + Math.abs(spot.y - station.row)).toBe(1);
   });
 
   it("rearms at a dome it can walk to, passing over a nearer one cut off by high ground", () => {
