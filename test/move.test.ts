@@ -32,6 +32,8 @@ const flatWorld: World = {
   hunterSightCells: config.dashboard.hunterSightCells,
   hunterHoldCells: config.dashboard.hunterHoldCells,
   hunterInvestigateSeconds: config.dashboard.hunterInvestigateSeconds,
+  viewCols: config.localMap.viewCols,
+  viewRows: config.localMap.viewRows,
 };
 
 function step(state: DashboardState, actions: Action[], dt = DT, w: World = flatWorld): DashboardState {
@@ -50,8 +52,18 @@ describe("choosing a walk point", () => {
     expect(s.cross).toEqual({ col: Math.round(s.pos.x), row: Math.round(s.pos.y) });
   });
 
-  it("the cross moves over the local map and cannot leave it", () => {
+  it("on the local map the cross stays inside the local view", () => {
     let s = step(createDashboardState(config), ["activate"]);
+    for (let i = 0; i < flatWorld.map.cols + 5; i++) s = step(s, ["right"]);
+    expect(s.cross.col).toBe(Math.min(flatWorld.map.cols - 1, s.pos.x + (config.localMap.viewCols - 1) / 2));
+    for (let i = 0; i < flatWorld.map.rows + 5; i++) s = step(s, ["down"]);
+    expect(s.cross.row).toBe(Math.min(flatWorld.map.rows - 1, s.pos.y + (config.localMap.viewRows - 1) / 2));
+  });
+
+  it("on the full map the cross moves over the whole world and cannot leave it", () => {
+    let s = step({ ...createDashboardState(config), zoom: "full" }, ["activate"]);
+    expect(s.mode).toBe("moving");
+    expect(s.zoom).toBe("full");
     for (let i = 0; i < flatWorld.map.cols + 5; i++) s = step(s, ["right"]);
     expect(s.cross.col).toBe(flatWorld.map.cols - 1);
     for (let i = 0; i < flatWorld.map.rows + 5; i++) s = step(s, ["down"]);

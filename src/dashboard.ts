@@ -65,6 +65,8 @@ export interface World {
   hunterSightCells: number; // a hunter this close to the robot sees it (design-notes 4.10)
   hunterHoldCells: number; // an alerted hunter closes to this range, then holds
   hunterInvestigateSeconds: number; // how long a hunter searches where it was sent
+  viewCols: number; // the mini map's local window, in cells: also the reach of the robot's equipment
+  viewRows: number;
 }
 
 export interface DashboardState {
@@ -153,6 +155,8 @@ export function worldFor(cfg: Config): World {
       hunterSightCells: cfg.dashboard.hunterSightCells,
       hunterHoldCells: cfg.dashboard.hunterHoldCells,
       hunterInvestigateSeconds: cfg.dashboard.hunterInvestigateSeconds,
+      viewCols: cfg.localMap.viewCols,
+      viewRows: cfg.localMap.viewRows,
     };
   }
   return cachedWorld;
@@ -612,20 +616,23 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
   if (action === "activate") {
     const verb = selectedVerb(s);
     if (verb === "missile") {
+      // Equipment only reaches what the local map shows, so using it pulls the map back to local.
+      const local: DashboardState = { ...s, zoom: "local" };
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
-      return { ...s, mode: "targeting", purpose: "missile", cross, target: nearestTarget(cross, world, anyTarget, (i) => cellOf(s, i, world)) };
+      return { ...local, mode: "targeting", purpose: "missile", cross, target: nearestTarget(cross, world, inView(local, world, anyTarget), (i) => cellOf(s, i, world)) };
     }
     if (verb === "move") {
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
       return { ...s, mode: "moving", cross };
     }
     if (verb === "scan") {
-      return { ...alertTo(s, alertHunters(s, world), world), scan: scanFrom(s, world), pulseStarted: s.time };
+      return { ...alertTo(s, alertHunters(s, world), world), zoom: "local", scan: scanFrom(s, world), pulseStarted: s.time };
     }
     if (verb === "gridDisable" && gridDisableReady(s)) {
       // Choose a power station with the cross, the same way as a missile target.
+      const local: DashboardState = { ...s, zoom: "local" };
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
-      return { ...s, mode: "targeting", purpose: "gridDisable", cross, target: nearestTarget(cross, world, isPowerStation, (i) => cellOf(s, i, world)) };
+      return { ...local, mode: "targeting", purpose: "gridDisable", cross, target: nearestTarget(cross, world, inView(local, world, isPowerStation), (i) => cellOf(s, i, world)) };
     }
   }
   return s;
@@ -691,22 +698,64 @@ function movingAction(s: DashboardState, action: Action, world: World): Dashboar
     if (route === null) return s;
     return { ...s, mode: "browse", route };
   }
-  return { ...s, cross: shiftCross(s.cross, action, world) };
+  return { ...s, cross: shiftCross(s, action, world) };
 }
 
-function shiftCross(cross: Cross, action: Action, world: World): Cross {
+/** The cells the mini map shows at its current zoom: a window round the robot, or the whole world. */
+export interface ViewBounds {
+  minCol: number;
+  maxCol: number;
+  minRow: number;
+  maxRow: number;
+}
+
+/**
+ * The cells whose centres lie inside the mini map at its current zoom. In the local view this
+ * is also the reach of the robot's equipment (missile, grid disable): the rectangle, not a radius.
+ */
+export function viewBounds(s: DashboardState, world: World): ViewBounds {
+  const map = world.map;
+  if (s.zoom === "full") return { minCol: 0, maxCol: map.cols - 1, minRow: 0, maxRow: map.rows - 1 };
+  const halfCols = (world.viewCols - 1) / 2;
+  const halfRows = (world.viewRows - 1) / 2;
+  return {
+    minCol: Math.max(0, Math.ceil(s.pos.x - halfCols)),
+    maxCol: Math.min(map.cols - 1, Math.floor(s.pos.x + halfCols)),
+    minRow: Math.max(0, Math.ceil(s.pos.y - halfRows)),
+    maxRow: Math.min(map.rows - 1, Math.floor(s.pos.y + halfRows)),
+  };
+}
+
+/** True when a cell is inside the view bounds. */
+export function inBounds(b: ViewBounds, col: number, row: number): boolean {
+  return col >= b.minCol && col <= b.maxCol && row >= b.minRow && row <= b.maxRow;
+}
+
+/** Narrows a target filter to targets the mini map currently shows. */
+function inView(s: DashboardState, world: World, accept: (t: Target) => boolean): (t: Target, index: number) => boolean {
+  const b = viewBounds(s, world);
+  return (t, index) => {
+    if (!accept(t)) return false;
+    const at = cellOf(s, index, world);
+    return inBounds(b, at.col, at.row);
+  };
+}
+
+/** One step of the cross, held inside what the mini map shows. */
+function shiftCross(s: DashboardState, action: Action, world: World): Cross {
   const dCol = action === "left" ? -1 : action === "right" ? 1 : 0;
   const dRow = action === "up" ? -1 : action === "down" ? 1 : 0;
+  const b = viewBounds(s, world);
   return {
-    col: clamp(cross.col + dCol, 0, world.map.cols - 1),
-    row: clamp(cross.row + dRow, 0, world.map.rows - 1),
+    col: clamp(s.cross.col + dCol, b.minCol, b.maxCol),
+    row: clamp(s.cross.row + dRow, b.minRow, b.maxRow),
   };
 }
 
 function moveCross(s: DashboardState, action: Action, world: World): DashboardState {
-  const cross = shiftCross(s.cross, action, world);
+  const cross = shiftCross(s, action, world);
   const filter = s.purpose === "gridDisable" ? isPowerStation : anyTarget;
-  return { ...s, cross, target: nearestTarget(cross, world, filter, (i) => cellOf(s, i, world)) };
+  return { ...s, cross, target: nearestTarget(cross, world, inView(s, world, filter), (i) => cellOf(s, i, world)) };
 }
 
 function anyTarget(): boolean {
@@ -721,13 +770,13 @@ function isPowerStation(t: Target): boolean {
 export function nearestTarget(
   cross: Cross,
   world: World,
-  accept: (t: Target) => boolean = anyTarget,
+  accept: (t: Target, index: number) => boolean = anyTarget,
   cellAt: (index: number) => Cross = (i) => ({ col: world.targets[i].col, row: world.targets[i].row })
 ): number | null {
   let best: number | null = null;
   let bestDistance = Infinity;
   world.targets.forEach((t, index) => {
-    if (!accept(t)) return;
+    if (!accept(t, index)) return;
     const at = cellAt(index);
     const distance = Math.max(Math.abs(at.col - cross.col), Math.abs(at.row - cross.row));
     if (distance <= world.range && distance < bestDistance) {

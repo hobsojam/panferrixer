@@ -34,6 +34,24 @@ describe("grid disable", () => {
     expect(isSuppressed(chooser, 0)).toBe(false);
   });
 
+  it("choosing it from the full map pulls the map back to local", () => {
+    const onGrid = { ...createDashboardState(config), row: 1, col: 1, zoom: "full" as const };
+    const chooser = stepDashboard(onGrid, ["activate"], DT, world).state;
+    expect(chooser.mode).toBe("targeting");
+    expect(chooser.zoom).toBe("local");
+  });
+
+  it("a power station outside the local view cannot be chosen", () => {
+    const station = powerOf(0);
+    // The robot stands so the station sits one row past the view's bottom edge; the cross is at that edge.
+    const halfRows = (config.localMap.viewRows - 1) / 2;
+    const pos = { x: station.col, y: station.row - halfRows - 1 };
+    const s: DashboardState = { ...choosingStation(0), pos, cross: { col: station.col, row: station.row - 2 }, target: null };
+    const moved = stepDashboard(s, ["down", "down"], DT, world).state;
+    expect(moved.cross.row).toBe(station.row - 1);
+    expect(moved.target).toBeNull();
+  });
+
   it("the cross only selects power stations", () => {
     const building = world.targets.find((t) => t.kind !== "power")!;
     const onBuilding = { ...choosingStation(0), cross: { col: building.col, row: building.row }, target: null };

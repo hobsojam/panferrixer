@@ -383,8 +383,10 @@ function drawPulse(
 }
 
 /**
- * Full zoom: the whole world scaled into the panel. Towns are rings, targets are dots,
- * and the robot is a dot at its real position. Nothing is centred or scrolled.
+ * Full zoom: the whole world scaled into the panel, for planning and travel. Networks are
+ * rings that show whether their power is cut; buildings and enemies are not drawn (only the
+ * local map shows them). Salvage blips stay, so the player can remember where to go.
+ * The robot is a dot at its real position. Nothing is centred or scrolled.
  */
 function drawFullMap(
   ctx: CanvasRenderingContext2D,
@@ -413,23 +415,19 @@ function drawFullMap(
   }
   ctx.globalAlpha = 1;
 
-  for (const town of world.towns) {
+  // One ring per network (a network is a town). Its buildings and enemies are local-map detail.
+  // A network whose power is cut shows a dashed ring in the shield colour until it comes back.
+  world.towns.forEach((town, network) => {
     const [tx, ty] = toScreen(town.x, town.y);
-    ctx.strokeStyle = c.text;
+    const down = isSuppressed(state, network);
+    ctx.strokeStyle = down ? c.shield : c.text;
     ctx.lineWidth = 1;
+    ctx.setLineDash(down ? [2, 2] : []);
     ctx.beginPath();
     ctx.arc(tx, ty, 3.5, 0, Math.PI * 2);
     ctx.stroke();
-  }
-
-  ctx.fillStyle = c.text;
-  for (const [index] of world.targets.entries()) {
-    const at = positionOf(state, index, world);
-    const [tx, ty] = toScreen(at.x, at.y);
-    ctx.beginPath();
-    ctx.arc(tx, ty, 1, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  });
+  ctx.setLineDash([]);
 
   if (isPaused(state)) drawTimeStopped(ctx, x, y, w, h, cfg);
 

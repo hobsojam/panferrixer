@@ -9,10 +9,10 @@ function step(state: DashboardState, actions: Action[]) {
   return stepDashboard(state, actions, DT, world);
 }
 
-/** A dashboard already in targeting mode with the cross on the given target. */
+/** A dashboard already in targeting mode, the robot beside the given target and the cross on it. */
 function targetingOn(index: number): DashboardState {
   const t = world.targets[index];
-  return { ...createDashboardState(config), mode: "targeting", cross: { col: t.col, row: t.row }, target: index };
+  return { ...createDashboardState(config), pos: { x: t.col, y: t.row }, mode: "targeting", cross: { col: t.col, row: t.row }, target: index };
 }
 
 describe("dashboard selection", () => {
@@ -54,10 +54,38 @@ describe("targeting", () => {
     expect(next.target).not.toBeNull();
   });
 
-  it("the cross cannot leave the local map", () => {
+  it("the cross cannot leave the local view: the mini map's rectangle is the missile's reach", () => {
     let s = targetingOn(0);
+    const halfCols = (config.localMap.viewCols - 1) / 2;
+    const halfRows = (config.localMap.viewRows - 1) / 2;
     for (let i = 0; i < world.map.cols + 5; i++) s = step(s, ["right"]).state;
-    expect(s.cross.col).toBe(world.map.cols - 1);
+    expect(s.cross.col).toBe(Math.min(world.map.cols - 1, s.pos.x + halfCols));
+    for (let i = 0; i < world.map.rows + 5; i++) s = step(s, ["down"]).state;
+    expect(s.cross.row).toBe(Math.min(world.map.rows - 1, s.pos.y + halfRows));
+    for (let i = 0; i < world.map.cols + 5; i++) s = step(s, ["left"]).state;
+    expect(s.cross.col).toBe(Math.max(0, s.pos.x - halfCols));
+  });
+
+  it("a target outside the local view cannot be selected", () => {
+    const t = world.targets[0];
+    // The robot stands so the target sits one cell past the view's right edge, and the cross is at that edge.
+    const halfCols = (config.localMap.viewCols - 1) / 2;
+    const pos = { x: t.col - halfCols - 1, y: t.row };
+    const s: DashboardState = { ...createDashboardState(config), pos, mode: "targeting", cross: { col: t.col - 2, row: t.row }, target: null };
+    const next = step(s, ["right"]).state;
+    expect(next.cross.col).toBe(t.col - 1);
+    expect(next.target).not.toBe(0);
+  });
+
+  it("choosing Missile or Scan from the full map pulls the map back to local", () => {
+    const full = { ...createDashboardState(config), zoom: "full" as const };
+    const missile = step({ ...full, row: 1, col: 0 }, ["activate"]).state;
+    expect(selectedVerb({ ...full, row: 1, col: 0 })).toBe("missile");
+    expect(missile.mode).toBe("targeting");
+    expect(missile.zoom).toBe("local");
+    const scan = step({ ...full, row: 0, col: 1 }, ["activate"]).state;
+    expect(selectedVerb({ ...full, row: 0, col: 1 })).toBe("scan");
+    expect(scan.zoom).toBe("local");
   });
 
   it("activating with a target in range fires that target", () => {

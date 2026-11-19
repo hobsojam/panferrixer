@@ -41,7 +41,7 @@ describe("dashboard sounds", () => {
 
   it("a lock when a target comes into range", () => {
     const t = world.targets[0];
-    const targeting = { ...createDashboardState(config), mode: "targeting" as const, cross: { col: t.col - 5, row: t.row }, target: null };
+    const targeting = { ...createDashboardState(config), pos: { x: t.col, y: t.row }, mode: "targeting" as const, cross: { col: t.col - 5, row: t.row }, target: null };
     expect(dashEvents(targeting, ["right", "right", "right", "right"])).toContain("lock");
   });
 
