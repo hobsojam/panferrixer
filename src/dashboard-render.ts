@@ -1,6 +1,6 @@
 import { ART, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
-import { AVAILABLE_VERBS, VERB_GRID, blipStrength, buildingCells, gridDisableReady, isInsideBuilding, isLow, isPaused, isSuppressed, positionOf, ringReach, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
+import { AVAILABLE_VERBS, VERB_GRID, blipStrength, buildingCells, gridDisableReady, isHidden, isInsideBuilding, isLow, isPaused, isSuppressed, positionOf, ringReach, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
 import { drawCracks, tracePlate } from "./plates";
 import { drawGlow } from "./render";
@@ -16,6 +16,7 @@ const VERB_LABELS: Record<Verb, string> = {
 const TARGET_LABELS: Record<Target["kind"], string> = {
   power: "POWER",
   hunter: "HUNTER",
+  defender: "DEFENDER",
   mine: "MINE",
   commsCentre: "COMMS CENTRE",
   dome: "DOME",
@@ -304,6 +305,7 @@ function drawLocalMap(
 
   const targeting = state.mode === "targeting";
   world.targets.forEach((t, index) => {
+    if (isHidden(state, index, world)) return; // a defender asleep in its dome is not shown
     const at = positionOf(state, index, world);
     const [tx, ty] = toScreen(at.x, at.y);
     if (state.ruins.includes(index)) {

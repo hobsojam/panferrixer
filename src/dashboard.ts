@@ -1,5 +1,5 @@
 import type { Config } from "./config";
-import { generateWorld, inTown, townCentres, type LocalMap, type Target, type Town } from "./local-map";
+import { generateWorld, inTown, isEnemyKind, townCentres, type LocalMap, type Target, type Town } from "./local-map";
 import { createRng } from "./rng";
 import { canWalk, stepToward } from "./enemy-move";
 import { cellKey, findRoute, findRouteToAny, isPassable, OFFSETS, walkPoint, type Blocked } from "./route";
@@ -64,6 +64,8 @@ export interface World {
   hunterFirstAttackDelayMax: number;
   hunterSightCells: number; // a hunter this close to the robot sees it (design-notes 4.10)
   hunterHoldCells: number; // an alerted hunter closes to this range, then holds
+  defenderSpeed: number; // cells per second
+  defenderGuardCells: number; // an awake defender guards this far round its post (design-notes 4.10)
   viewCols: number; // the mini map's local window, in cells: also the reach of the robot's equipment
   viewRows: number;
 }
@@ -109,6 +111,10 @@ export interface DashboardState {
   breatherUntil: number;
   // Hits taken on the top shield plate so far. A plate goes when it reaches hitsPerPlate.
   shieldHits: number;
+  // Defenders (target indices) woken out of their domes. The rest are hidden inside (design-notes 4.4).
+  awake: number[];
+  // Defenders woken during a flight whose first-attack wait starts when the player is back at the dashboard.
+  heldAttacks: number[];
 }
 
 /** A hunter sent to rearm: it walks there, stays a while, then goes home. */
@@ -164,6 +170,8 @@ export function worldFor(cfg: Config): World {
       hunterFirstAttackDelayMax: cfg.dashboard.hunterFirstAttackDelayMax,
       hunterSightCells: cfg.dashboard.hunterSightCells,
       hunterHoldCells: cfg.dashboard.hunterHoldCells,
+      defenderSpeed: cfg.dashboard.defenderSpeed,
+      defenderGuardCells: cfg.dashboard.defenderGuardCells,
       viewCols: cfg.localMap.viewCols,
       viewRows: cfg.localMap.viewRows,
     };
@@ -202,6 +210,8 @@ export function createDashboardState(cfg: Config): DashboardState {
     attacksUsed: {},
     breatherUntil: 0,
     shieldHits: 0,
+    awake: [],
+    heldAttacks: [],
   };
 }
 
@@ -217,8 +227,9 @@ export function startPosition(world: World, cfg: Config): Point {
   const blocked = new Set<number>();
   const posts: Point[] = [];
   for (const t of world.targets) {
+    // A defender is asleep in its dome at the start, so only the hunters are looking.
     if (t.kind === "hunter") posts.push({ x: t.col, y: t.row });
-    else blocked.add(cellKey(world.map, t.col, t.row));
+    else if (isBuilding(t)) blocked.add(cellKey(world.map, t.col, t.row));
   }
   const outsideTowns = (x: number, y: number) =>
     !world.towns.some((t) => inTown(t, world.townRadiusCols + clearance, world.townRadiusRows + clearance, x, y));
@@ -266,7 +277,7 @@ export function isSuppressed(state: DashboardState, network: number): boolean {
  * building even if the window closes during its flight. A power station has no shield.
  */
 export function isShielded(state: DashboardState, target: Target): boolean {
-  if (target.kind === "power" || target.kind === "hunter") return false;
+  if (target.kind === "power" || !isBuilding(target)) return false;
   return !isSuppressed(state, networkOf(target));
 }
 
@@ -290,9 +301,47 @@ export function cellOf(s: DashboardState, index: number, world: World): Cross {
   return { col: Math.round(p.x), row: Math.round(p.y) };
 }
 
-/** True for a target that is a building. Hunters are enemies, not buildings. */
+/** True for a target that is a building. Hunters and defenders are enemies, not buildings. */
 export function isBuilding(t: Target): boolean {
-  return t.kind !== "hunter";
+  return !isEnemyKind(t.kind);
+}
+
+/**
+ * True for a defender still asleep in its dome (design-notes 4.4): it is not drawn, cannot be
+ * chosen as a target, does not move and does not look. Not knowing which domes are occupied
+ * is the point.
+ */
+export function isHidden(s: DashboardState, index: number, world: World): boolean {
+  return world.targets[index].kind === "defender" && !s.awake.includes(index);
+}
+
+/**
+ * A missile has hit a dome, whether it destroyed it or the shield deflected it (design-notes
+ * 4.4). The dome's defender, if it has one, comes out at its post beside the dome and is
+ * alerted. Only the hit dome's defender wakes, not its neighbours'. It moves in real time
+ * like any enemy, but its first attack is held until the player is back at the dashboard
+ * (see startHeldWaits): woken at impact, its usual short wait would otherwise run out
+ * while the result shows, and it would always strike first.
+ */
+export function wakeDefender(s: DashboardState, dome: number, world: World): DashboardState {
+  const index = world.targets.findIndex((t) => t.kind === "defender" && t.home === dome);
+  if (index === -1 || s.awake.includes(index) || s.ruins.includes(index)) return s;
+  const alerted = alertTo({ ...s, awake: [...s.awake, index] }, [index], world);
+  return { ...alerted, heldAttacks: [...alerted.heldAttacks, index] };
+}
+
+/**
+ * The player is back at the dashboard after a flight: each defender woken during it starts
+ * its usual 1 to 3 second wait before its first attack now, so the player sees it come out
+ * and has a fair chance to strike first (design-notes 4.4).
+ */
+export function startHeldWaits(s: DashboardState, world: World): DashboardState {
+  if (s.heldAttacks.length === 0) return s;
+  const ready = { ...s.hunterReadyAt };
+  for (const index of s.heldAttacks) {
+    ready[index] = s.time + firstAttackWait(s, index, world);
+  }
+  return { ...s, hunterReadyAt: ready, heldAttacks: [] };
 }
 
 /**
@@ -345,22 +394,31 @@ export function alertTo(s: DashboardState, indices: readonly number[], world: Wo
 }
 
 /**
- * Moves the hunters (design-notes 4.10). Every hunter is always looking: one that comes
+ * Moves the enemies (design-notes 4.10). Every hunter is always looking: one that comes
  * within sight of the robot is alerted, whatever it was doing. An alerted hunter closes
  * to its preferred range and holds there while it attacks, and breaks off once the robot
  * is beyond its leash. While its network's power is cut, a hunter makes rounds of the
  * network's domes, then goes home when the power returns. A hunter that has used its magazine withdraws to a dome, rearms, then
  * goes home no longer alerted. Otherwise it walks back to its post. A destroyed hunter
  * does not move.
+ *
+ * A defender behaves the same once it is awake, but only guards: it sees and chases the robot
+ * only while the robot is within its guard area round its post, breaks off once the robot
+ * leaves it, and rearms at its own post. It never patrols. A defender asleep in its dome does nothing.
  */
 export function moveHunters(s: DashboardState, world: World, dt: number): DashboardState {
   let next = s;
   world.targets.forEach((t, index) => {
-    if (t.kind !== "hunter" || next.ruins.includes(index)) return;
+    if (!isEnemyKind(t.kind) || next.ruins.includes(index) || isHidden(next, index, world)) return;
+    const defender = t.kind === "defender";
     const post = { x: t.col, y: t.row };
     const here = positionOf(next, index, world);
-    if (distanceTo(next.pos, here.x, here.y) <= world.hunterSightCells) next = alertTo(next, [index], world); // a rearming hunter is skipped
-    if (next.alerted.includes(index) && Math.hypot(here.x - post.x, here.y - post.y) > world.hunterLeashCells) {
+    // A hunter's leash is how far it has come from its post; a defender's guard area is where the robot is.
+    const inReach = defender
+      ? distanceTo(next.pos, post.x, post.y) <= world.defenderGuardCells
+      : Math.hypot(here.x - post.x, here.y - post.y) <= world.hunterLeashCells;
+    if (inReach && distanceTo(next.pos, here.x, here.y) <= world.hunterSightCells) next = alertTo(next, [index], world); // a rearming enemy is skipped
+    if (next.alerted.includes(index) && !inReach) {
       next = { ...next, alerted: next.alerted.filter((i) => i !== index) };
     }
     const alerted = next.alerted.includes(index);
@@ -411,7 +469,7 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
     // post is never one, and a patrol stop or rearm point is a free cell beside a building that
     // the hunter can walk to. A goal across high ground is approached as near as the hunter
     // can get, and tried again on the next step.
-    const pos = stepToward(here, goal, world.map, world.hunterSpeed * dt);
+    const pos = stepToward(here, goal, world.map, (defender ? world.defenderSpeed : world.hunterSpeed) * dt);
     next = { ...next, hunterPos: { ...next.hunterPos, [index]: pos } };
   });
   return next;
@@ -493,10 +551,11 @@ export function spendAttack(s: DashboardState, index: number, world: World): Das
 
 /**
  * Where a hunter rearms: beside the nearest intact dome in its network that it can walk to,
- * or its post. A dome cut off by high ground is passed over.
+ * or its post. A dome cut off by high ground is passed over. A defender rearms at its own post.
  */
 function rearmPoint(s: DashboardState, index: number, world: World): Point {
   const hunter = world.targets[index];
+  if (hunter.kind === "defender") return { x: hunter.col, y: hunter.row };
   const here = positionOf(s, index, world);
   const blocked = buildingCells(s, world);
   const byDistance = (cells: Point[]) => cells.sort((a, b) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(b.x - here.x, b.y - here.y));
@@ -549,11 +608,15 @@ export function delayFirstAttacks(s: DashboardState, alerted: readonly number[],
   const ready = { ...s.hunterReadyAt };
   for (const index of alerted) {
     if (s.alerted.includes(index)) continue;
-    const roll = createRng(Math.floor(s.time * 1000) * 31 + index)();
-    const wait = world.hunterFirstAttackDelayMin + roll * (world.hunterFirstAttackDelayMax - world.hunterFirstAttackDelayMin);
-    ready[index] = Math.max(ready[index] ?? 0, s.time + wait);
+    ready[index] = Math.max(ready[index] ?? 0, s.time + firstAttackWait(s, index, world));
   }
   return ready;
+}
+
+/** The wait before an enemy's first attack, drawn from the clock and the enemy so it is reproducible. */
+function firstAttackWait(s: DashboardState, index: number, world: World): number {
+  const roll = createRng(Math.floor(s.time * 1000) * 31 + index)();
+  return world.hunterFirstAttackDelayMin + roll * (world.hunterFirstAttackDelayMax - world.hunterFirstAttackDelayMin);
 }
 
 /**
@@ -565,8 +628,8 @@ export function hunterInRange(s: DashboardState, world: World, range: number): n
   if (s.time < s.breatherUntil) return null;
   for (const index of s.alerted) {
     const t = world.targets[index];
-    if (!t || t.kind !== "hunter" || s.ruins.includes(index) || s.rearming[index]) continue;
-    if (s.time < (s.hunterReadyAt[index] ?? 0)) continue;
+    if (!t || !isEnemyKind(t.kind) || s.ruins.includes(index) || s.rearming[index] || isHidden(s, index, world)) continue;
+    if (s.time < (s.hunterReadyAt[index] ?? 0) || s.heldAttacks.includes(index)) continue;
     const p = positionOf(s, index, world);
     if (distanceTo(s.pos, p.x, p.y) <= range) return index;
   }
@@ -789,7 +852,8 @@ export function inBounds(b: ViewBounds, col: number, row: number): boolean {
 function inView(s: DashboardState, world: World, accept: (t: Target) => boolean): (t: Target, index: number) => boolean {
   const b = viewBounds(s, world);
   return (t, index) => {
-    if (!accept(t)) return false;
+    // A defender asleep in its dome cannot be seen, so it cannot be chosen.
+    if (!accept(t) || isHidden(s, index, world)) return false;
     const at = cellOf(s, index, world);
     return inBounds(b, at.col, at.row);
   };

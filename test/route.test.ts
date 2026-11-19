@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
-import { generateWorld } from "../src/local-map";
+import { generateWorld, isEnemyKind } from "../src/local-map";
 import { cellKey, findRoute, findRouteToAny, isPassable, OFFSETS } from "../src/route";
 import { mapOf } from "./helpers";
 
@@ -92,7 +92,7 @@ describe("the world leaves a passable path", () => {
   it("buildings never cut off a town or another building, across many seeds", () => {
     for (let seed = 1; seed <= 40; seed++) {
       const { map, towns, targets } = generateWorld({ ...config.localMap, worldSeed: seed });
-      const buildings = targets.filter((t) => t.kind !== "hunter");
+      const buildings = targets.filter((t) => !isEnemyKind(t.kind));
       const blocked = new Set(buildings.map((b) => cellKey(map, b.col, b.row)));
       expect(buildings.some((b) => towns.some((t) => t.x === b.col && t.y === b.row)), `seed ${seed} building on a town centre`).toBe(false);
       for (const t of towns) {
@@ -105,8 +105,9 @@ describe("the world leaves a passable path", () => {
     }
   });
 
-  it("every network still gets all its targets", () => {
+  it("every network still gets all its buildings and its hunter", () => {
     const { towns, targets } = generateWorld(config.localMap);
-    expect(targets.length).toBe(towns.length * config.localMap.targetsPerTown);
+    const perTown = 2 + config.localMap.domesPerTown + config.localMap.otherBuildingsPerTown;
+    expect(targets.filter((t) => t.kind !== "defender").length).toBe(towns.length * perTown);
   });
 });

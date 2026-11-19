@@ -31,6 +31,8 @@ const flatWorld: World = {
   hunterFirstAttackDelayMax: config.dashboard.hunterFirstAttackDelayMax,
   hunterSightCells: config.dashboard.hunterSightCells,
   hunterHoldCells: config.dashboard.hunterHoldCells,
+  defenderSpeed: config.dashboard.defenderSpeed,
+  defenderGuardCells: config.dashboard.defenderGuardCells,
   viewCols: config.localMap.viewCols,
   viewRows: config.localMap.viewRows,
 };

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { shieldsDuringAttack, updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
-import { createDashboardState, isShielded, isSuppressed, networkOf, worldFor, type DashboardState } from "../src/dashboard";
+import { createDashboardState, isBuilding, isShielded, isSuppressed, networkOf, worldFor, type DashboardState } from "../src/dashboard";
 import { createDefence } from "../src/defence";
 import { createInitialState } from "../src/flight";
 import type { Target } from "../src/local-map";
@@ -120,7 +120,7 @@ describe("what a hit does", () => {
 describe("overlapping towns", () => {
   it("a building is only unshielded by its own network's window, even where towns overlap", () => {
     const network = (t: Target) => networkOf(t);
-    for (const building of world.targets.filter((t) => t.kind !== "power" && t.kind !== "hunter")) {
+    for (const building of world.targets.filter((t) => t.kind !== "power" && isBuilding(t))) {
       const own = network(building);
       const ownDown = { ...createDashboardState(config), suppressedUntil: { [own]: 1000 } };
       expect(isShielded(ownDown, building)).toBe(false);

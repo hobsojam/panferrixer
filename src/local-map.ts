@@ -14,7 +14,9 @@ export interface LocalMapConfig {
   smoothingPasses: number;
   valleyBelow: number; // raw height below this is a valley
   highAbove: number; // raw height above this is high ground
-  targetsPerTown: number;
+  domesPerTown: number; // at least as many as the most defenders a network can draw (design-notes 4.4)
+  otherBuildingsPerTown: number; // mines and comms centres, drawn at random
+  defendersMax: number; // each network draws 0 to this many defenders, one per dome at most
   dropChance: number; // chance that a building holds a drop
   viewCols: number; // the mini map's local window
   viewRows: number;
@@ -33,7 +35,7 @@ export interface Town {
 }
 
 /** Placeholder target kinds: the comms centre replaces the original beacon (design-notes 4.4). Art is not designed yet. */
-export type TargetKind = "power" | "hunter" | "mine" | "commsCentre" | "dome";
+export type TargetKind = "power" | "hunter" | "defender" | "mine" | "commsCentre" | "dome";
 
 export interface Target {
   col: number;
@@ -41,6 +43,12 @@ export interface Target {
   kind: TargetKind;
   hasDrop: boolean; // the drop is hidden under the building; found only once it is destroyed
   network: number; // the town (network) it was placed in. Towns can overlap, so position alone does not say
+  home?: number; // a defender's dome (target index); its col and row are the free cell beside it, its post
+}
+
+/** True for the enemies: they move, have no shields and are not buildings. */
+export function isEnemyKind(kind: TargetKind): boolean {
+  return kind === "hunter" || kind === "defender";
 }
 
 export interface World {
@@ -49,8 +57,8 @@ export interface World {
   targets: Target[];
 }
 
-/** The kinds besides the power station, which every network has exactly one of. */
-const TARGET_KINDS: readonly TargetKind[] = ["mine", "commsCentre", "dome"];
+/** The other buildings a town may have besides its power station and domes. */
+const OTHER_KINDS: readonly TargetKind[] = ["mine", "commsCentre"];
 
 /** Where each town sits: the network's hand-placed positions, spread over the whole map. */
 export function townCentres(cfg: LocalMapConfig): Town[] {
@@ -170,14 +178,24 @@ function cheapestPath(map: LocalMap, sources: Cell[], isGoal: (x: number, y: num
   return null;
 }
 
-/** Placeholder targets inside the towns: never in a valley, and distinct cells. */
+/**
+ * The targets inside the towns: never in a valley, and distinct cells. Each town gets its power
+ * station, its hunter, its domes and a few other buildings (#62), then each network's garrison
+ * (design-notes 4.4) is hidden in its domes.
+ */
 function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target[] {
   const rng = createRng(cfg.worldSeed * 6151 + 1);
   const targets: Target[] = [];
+  const plan: readonly ("power" | "hunter" | "dome" | "other")[] = [
+    "power",
+    "hunter",
+    ...Array<"dome">(cfg.domesPerTown).fill("dome"),
+    ...Array<"other">(cfg.otherBuildingsPerTown).fill("other"),
+  ];
   for (let network = 0; network < towns.length; network++) {
     const town = towns[network];
     let placed = 0;
-    for (let attempt = 0; attempt < 500 && placed < cfg.targetsPerTown; attempt++) {
+    for (let attempt = 0; attempt < 500 && placed < plan.length; attempt++) {
       const col = town.x + Math.round((rng() * 2 - 1) * cfg.townRadiusCols);
       const row = town.y + Math.round((rng() * 2 - 1) * cfg.townRadiusRows);
       if (!inTown(town, cfg.townRadiusCols, cfg.townRadiusRows, col, row)) continue;
@@ -186,18 +204,53 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
       // Buildings block the robot, so a building may not cut off a town or another building.
       // The hunter is not a building and may stand anywhere on ground the robot can walk to,
       // but never on high ground, which blocks enemies too.
-      const isHunter = placed === 1;
+      const isHunter = plan[placed] === "hunter";
       if (isHunter && !reachableFrom(towns[0], map).has(cellKey(map, col, row))) continue;
-      if (!isHunter && !keepsRoutesOpen(map, towns, [...targets.filter((t) => t.kind !== "hunter"), { col, row }])) continue;
+      if (!isHunter && !keepsRoutesOpen(map, towns, [...targets.filter((t) => !isEnemyKind(t.kind)), { col, row }])) continue;
       // Each network has one power station, placed first. It is never a drop: it cannot be destroyed.
-      // The hunter, placed second, is the network's one enemy. It has no drop.
-      const kind = placed === 0 ? "power" : placed === 1 ? "hunter" : TARGET_KINDS[Math.floor(rng() * TARGET_KINDS.length)];
+      // The hunter, placed second, is the network's guard on duty. It has no drop.
+      const step = plan[placed];
+      const kind: TargetKind = step === "other" ? OTHER_KINDS[Math.floor(rng() * OTHER_KINDS.length)] : step;
       const hasDrop = rng() < cfg.dropChance && kind !== "power" && kind !== "hunter";
       targets.push({ col, row, kind, hasDrop, network });
       placed += 1;
     }
   }
-  return targets;
+  return [...targets, ...placeDefenders(map, towns, targets, cfg)];
+}
+
+/**
+ * Each network's garrison (design-notes 4.4): from 0 to defendersMax defenders, the number drawn
+ * per network, each in a different dome chosen at random. A defender's post is a free cell beside
+ * its dome that can be walked to from the towns, where it comes out of the door when woken. A
+ * network that draws more defenders than it has domes with a free cell places only as many as fit.
+ * Drawn from its own stream, so the buildings do not move when the garrison rules change.
+ */
+function placeDefenders(map: LocalMap, towns: Town[], buildings: readonly Target[], cfg: LocalMapConfig): Target[] {
+  const rng = createRng(cfg.worldSeed * 4241 + 3);
+  const blocked = new Set(buildings.filter((t) => !isEnemyKind(t.kind)).map((t) => cellKey(map, t.col, t.row)));
+  const reached = reachableFrom(towns[0], map, blocked);
+  const defenders: Target[] = [];
+  for (let network = 0; network < towns.length; network++) {
+    const count = Math.floor(rng() * (cfg.defendersMax + 1));
+    const domes = buildings.map((t, i) => ({ t, i })).filter(({ t }) => t.kind === "dome" && t.network === network);
+    // Shuffle (Fisher-Yates), so which domes are occupied is random.
+    for (let i = domes.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [domes[i], domes[j]] = [domes[j], domes[i]];
+    }
+    let placed = 0;
+    for (const { t, i } of domes) {
+      if (placed >= count) break;
+      const post = OFFSETS.map(([dx, dy]) => ({ col: t.col + dx, row: t.row + dy })).find(
+        (c) => reached.has(cellKey(map, c.col, c.row)) && isPassable(map, c.col, c.row, blocked)
+      );
+      if (!post) continue;
+      defenders.push({ ...post, kind: "defender", hasDrop: false, network, home: i });
+      placed += 1;
+    }
+  }
+  return defenders;
 }
 
 /**
