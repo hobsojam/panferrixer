@@ -29,11 +29,14 @@ import type { FlightState } from "./types";
  * The screens. The dashboard is persistent: a missile flight or a hunter's attack is
  * opened from it and returns to it, keeping the dashboard's selection and location.
  * `shielded` is decided at launch: it is the state of the network's shields when the missile was fired.
+ * `destroyed` is death (design-notes 3, item 17): the last shield plate broke during an attack.
+ * It leads only to a fresh game; there are no saves yet.
  */
 export type AppState =
   | { screen: "dashboard"; dashboard: DashboardState }
   | { screen: "flight"; dashboard: DashboardState; flight: FlightState; target: Target; targetIndex: number; shielded: boolean }
-  | { screen: "defence"; dashboard: DashboardState; defence: DefenceState; attacker: number };
+  | { screen: "defence"; dashboard: DashboardState; defence: DefenceState; attacker: number }
+  | { screen: "destroyed"; elapsed: number; seed: number };
 
 export interface AppInput {
   actions: readonly Action[]; // discrete presses this step; ignored during flight
@@ -82,6 +85,13 @@ export function updateApp(
 ): AppState {
   const world = worldFor(cfg);
 
+  if (state.screen === "destroyed") {
+    // The wreck shows for a moment; after that a press starts a new game from the beginning.
+    const elapsed = state.elapsed + dt;
+    if (elapsed >= cfg.death.restartAfterSeconds && input.actions.includes("activate")) return createAppState(cfg);
+    return { ...state, elapsed };
+  }
+
   if (state.screen === "dashboard") {
     const step = stepDashboard(state.dashboard, input.actions, dt, world);
     // Hunters move in real time, on every screen, so they keep coming during a flight or an
@@ -118,6 +128,8 @@ export function updateApp(
     // A fresh press fires as well as holding, so a quick tap is never lost between steps.
     const fire = (input.fire ?? false) || input.actions.includes("activate");
     const defence = stepDefence(state.defence, input.aim ?? { yaw: 0, pitch: 0 }, fire, dt, cfg);
+    // Zero shields is death (design-notes 3, item 17), the moment the last plate breaks.
+    if (shieldsDuringAttack(timed, defence, cfg).plates === 0) return { screen: "destroyed", elapsed: 0, seed: newSeed() };
     // Over, but the summary shows for a moment before the dashboard returns by itself.
     if (!summaryOver(defence, cfg)) return { ...state, dashboard: timed, defence };
     // The attack is over: every missile that got through is a hit on the shields. Then a short

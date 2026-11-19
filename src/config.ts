@@ -97,6 +97,11 @@ export const config = {
     maxGenerationAttempts: 50,
   },
 
+  // Death (design-notes 3, item 17): zero shields destroys the robot and the game starts again.
+  death: {
+    restartAfterSeconds: 2, // the wreck shows this long before a press can start a new game
+  },
+
   // Missile defence (design-notes 2.9a, 4.8, 4.9). Placeholders, tuned by playtest.
   defence: {
     warningSeconds: 1.5, // a short warning before the first volley

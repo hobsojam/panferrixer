@@ -25,7 +25,8 @@ export type SoundEvent =
   | "gun"
   | "missileDown"
   | "missileHit"
-  | "missileLaunch";
+  | "missileLaunch"
+  | "destroyed";
 
 /** The sounds that a change between two app states should make. Pure, so it can be tested. */
 export function eventsBetween(prev: AppState, next: AppState, cfg: Config): SoundEvent[] {
@@ -35,6 +36,7 @@ export function eventsBetween(prev: AppState, next: AppState, cfg: Config): Soun
   // The warning beat (design-notes 4.8): a sensor alarm as the attack takes the screen.
   if (prev.screen === "dashboard" && next.screen === "defence") return ["incoming"];
   if (prev.screen === "defence" && next.screen === "defence") return defenceEvents(prev.defence, next.defence);
+  if (prev.screen !== "destroyed" && next.screen === "destroyed") return ["destroyed"];
   return [];
 }
 
@@ -250,6 +252,13 @@ const PLAY: Record<SoundEvent, Player> = {
     noise(c, t, 1.2, 0.8, "lowpass", 700, 50);
     noise(c, t + 0.05, 0.9, 0.5, "bandpass", 900, 150);
     tone(c, t, 110, 0.7, "sine", 0.7, 25);
+  },
+  // The robot's own death: the crash, heavier and longer, then a second blast as it breaks up.
+  destroyed: (c, t) => {
+    noise(c, t, 0.1, 1, "highpass", 2500, 700);
+    noise(c, t, 2.2, 0.9, "lowpass", 800, 40);
+    tone(c, t, 120, 1.6, "sine", 0.9, 20);
+    noise(c, t + 0.35, 1.2, 0.6, "lowpass", 600, 50);
   },
   miss: (c, t) => {
     noise(c, t, 0.7, 0.25, "highpass", 2000, 400);
