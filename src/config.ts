@@ -173,6 +173,9 @@ export const config = {
     // Hunters are always looking (design-notes 4.10): coming this close to one alerts it.
     hunterSightCells: 5, // just inside the engagement range
     hunterHoldCells: 4, // an alerted hunter closes to this range, then holds while it attacks: the aggression dial
+    // Defenders (design-notes 4.4 and 4.10): woken out of their dome, they guard it. Placeholders.
+    defenderSpeed: 2, // cells per second
+    defenderGuardCells: 12, // the guard area: an awake defender sees and chases the robot only this close to its post. Covers the missile's reach across the local view, so a dome cannot be opened from outside it
     startClearanceCells: 2, // the robot starts at least this far outside a town and beyond any hunter's sight
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
@@ -188,7 +191,9 @@ export const config = {
     smoothingPasses: 2,
     valleyBelow: 0.46,
     highAbove: 0.54,
-    targetsPerTown: 3,
+    domesPerTown: 4, // #62: enough for a full garrison of four
+    otherBuildingsPerTown: 1, // a mine or a comms centre
+    defendersMax: 4, // design-notes 4.4: each network draws 0 to 4 defenders
     dropChance: 0.5, // placeholder: not every building holds a drop (design-notes 2.6)
     viewCols: 25, // the mini map's local window, in cells
     viewRows: 11,

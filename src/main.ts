@@ -1,6 +1,6 @@
 import { createAppState, shieldsDuringAttack, updateApp, type AppState } from "./app";
 import { config } from "./config";
-import type { Action } from "./dashboard";
+import { worldFor, type Action } from "./dashboard";
 import { renderDashboard } from "./dashboard-render";
 import { combineAim, mouseAim } from "./defence";
 import { renderDefence } from "./defence-render";
@@ -28,6 +28,11 @@ let state: AppState = createAppState(config);
 canvas.addEventListener("click", () => {
   if (state.screen === "defence") input.lockPointer(canvas);
 });
+
+/** The name shown over an attack: the attacking enemy's kind. */
+function attackerName(index: number): string {
+  return worldFor(config).targets[index]?.kind === "defender" ? "DEFENDER" : "HUNTER";
+}
 
 const fixedDt = config.simulation.fixedDtSeconds;
 let accumulator = 0;
@@ -64,7 +69,7 @@ function frame(now: number): void {
   if (state.screen === "dashboard") {
     renderDashboard(ctx!, state.dashboard, config, !sound.isMuted());
   } else if (state.screen === "defence") {
-    renderDefence(ctx!, state.defence, shieldsDuringAttack(state.dashboard, state.defence, config), config, input.isPointerLocked());
+    renderDefence(ctx!, state.defence, shieldsDuringAttack(state.dashboard, state.defence, config), config, input.isPointerLocked(), attackerName(state.attacker));
   } else {
     render(ctx!, state.flight, config, state.target.kind, state.shielded);
   }

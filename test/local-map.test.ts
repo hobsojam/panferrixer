@@ -41,8 +41,10 @@ describe("world map", () => {
 
   it("places targets inside towns and never in valleys", () => {
     const { map, towns, targets } = generateWorld(cfg);
-    expect(targets).toHaveLength(towns.length * cfg.targetsPerTown);
-    for (const target of targets) {
+    // Defenders stand beside their dome, which may be just outside the town: see the garrison tests.
+    const placed = targets.filter((t) => t.kind !== "defender");
+    expect(placed).toHaveLength(towns.length * (2 + cfg.domesPerTown + cfg.otherBuildingsPerTown));
+    for (const target of placed) {
       expect(towns.some((t) => inTown(t, cfg.townRadiusCols, cfg.townRadiusRows, target.col, target.row))).toBe(true);
       expect(map.tiers[target.row][target.col]).not.toBe(0);
     }

@@ -12,7 +12,9 @@ import {
   openWindow,
   positionOf,
   spendAttack,
+  startHeldWaits,
   stepDashboard,
+  wakeDefender,
   worldFor,
   type Action,
   type DashboardState,
@@ -133,8 +135,9 @@ export function updateApp(
     // A missile that destroyed an unshielded building or hunter leaves a ruin, and any drop under it can now be found.
     // A deflected missile and a power station hit leave nothing behind.
     const destroyed = state.flight.phase === "hit" && !state.shielded && state.target.kind !== "power";
-    const dashboard = destroyed ? markRuin(back, state.targetIndex) : back;
-    return { screen: "dashboard", dashboard };
+    const ruined = destroyed ? markRuin(back, state.targetIndex) : back;
+    // A defender woken by this missile starts its wait before attacking only now (design-notes 4.4).
+    return { screen: "dashboard", dashboard: startHeldWaits(ruined, world) };
   }
 
   // The shield clock runs in real time, so it keeps running while a missile is in the air.
@@ -144,6 +147,12 @@ export function updateApp(
   // A hit on a power station takes its network's shields down. The station itself survives.
   if (flight.phase === "hit" && state.flight.phase !== "hit" && state.target.kind === "power") {
     return { ...state, dashboard: openWindow(timed, networkOf(state.target), world), flight };
+  }
+  // A hit on a dome wakes its defender, if it has one, whether the missile destroys the dome
+  // or the shield deflects it (design-notes 4.4). It comes out while the result shows, but
+  // holds its first attack until the player is back at the dashboard.
+  if (flight.phase === "hit" && state.flight.phase !== "hit" && state.target.kind === "dome") {
+    return { ...state, dashboard: wakeDefender(timed, state.targetIndex, world), flight };
   }
   return { ...state, dashboard: timed, flight };
 }
