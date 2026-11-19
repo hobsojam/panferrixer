@@ -173,7 +173,6 @@ export const config = {
     // Hunters are always looking (design-notes 4.10): coming this close to one alerts it.
     hunterSightCells: 5, // just inside the engagement range
     hunterHoldCells: 4, // an alerted hunter closes to this range, then holds while it attacks: the aggression dial
-    hunterInvestigateSeconds: 10, // how long a hunter searches a cut power station before going home
     startClearanceCells: 2, // the robot starts at least this far outside a town and beyond any hunter's sight
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
