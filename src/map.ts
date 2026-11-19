@@ -1,7 +1,8 @@
 /**
- * The network graph shown on the dashboard's mini map (design-notes 2.4: ten nodes
- * joined by narrow passes). Hand-placed for now, so reachability is easy to check
- * and the layout is ours rather than the original's.
+ * Where the ten networks sit on the world map (design-notes 2.4). Hand-placed, so the
+ * layout is ours rather than the original's. Each network is a self-contained town;
+ * there are no links between them. Every town is reachable over the real terrain,
+ * which the world generator guarantees and test/reachability.test.ts checks.
  */
 export interface MapNode {
   x: number; // 0..1 across the map panel
@@ -10,7 +11,6 @@ export interface MapNode {
 
 export interface NetworkMap {
   nodes: readonly MapNode[];
-  links: readonly (readonly [number, number])[];
 }
 
 export const NETWORK: NetworkMap = {
@@ -26,35 +26,4 @@ export const NETWORK: NetworkMap = {
     { x: 0.8, y: 0.82 },
     { x: 0.94, y: 0.58 },
   ],
-  links: [
-    [0, 1],
-    [1, 2],
-    [2, 3],
-    [3, 4],
-    [4, 9],
-    [9, 7],
-    [7, 8],
-    [7, 6],
-    [6, 5],
-    [5, 0],
-    [2, 6],
-  ],
 };
-
-/** True when every node can be reached from node 0 by following links. */
-export function isConnected(map: NetworkMap): boolean {
-  const seen = new Set<number>([0]);
-  const queue = [0];
-  while (queue.length > 0) {
-    const node = queue.shift()!;
-    for (const [a, b] of map.links) {
-      const other = a === node ? b : b === node ? a : -1;
-      if (other >= 0 && !seen.has(other)) {
-        seen.add(other);
-        queue.push(other);
-      }
-    }
-  }
-  return seen.size === map.nodes.length;
-}
-
