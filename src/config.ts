@@ -2,6 +2,9 @@
 
 export type DistanceIndicatorMode = "none" | "markerChange" | "audioPing";
 
+/** The network where the robot begins: the dashboard starts there, and patrollers keep clear of it. */
+const START_NODE = 0;
+
 export const config = {
   seed: 1,
 
@@ -169,7 +172,7 @@ export const config = {
     lowThreshold: 2, // at or below this many cells or plates, the last one flashes and the trace agitates
     tracePoints: 120,
     formName: "PROTOTYPE", // placeholder for the robot form shown in the name bar
-    startNode: 0, // index into the network map where the robot begins
+    startNode: START_NODE, // index into the network map where the robot begins
     targetRange: 2, // in map cells, Chebyshev distance from the cross: a target is only selected this close
     pickupRadius: 1, // a drop within this many cells is picked up automatically
     closeRadius: 6, // a hunter this close to a scan always wakes (design-notes 4.10)
@@ -233,6 +236,8 @@ export const config = {
     patrollersPerSegment: 2,
     patrolBeatPoints: 4, // waypoints on each patroller's loop
     patrolBeatSpacing: 8, // waypoints on one loop are at least this many cells apart
+    startTown: START_NODE, // patrollers keep clear of the town where the robot begins
+    patrolStartClearCells: 16, // no beat comes this close to that town's centre, so the game cannot open with a patroller walking past
     viewCols: 25, // the mini map's local window, in cells
     viewRows: 11,
   },

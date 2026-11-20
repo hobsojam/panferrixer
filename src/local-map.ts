@@ -1,5 +1,5 @@
 import { NETWORK } from "./map";
-import { cellKey, isPassable, OFFSETS, reachableFrom, type Cell } from "./route";
+import { cellKey, findRoute, isPassable, OFFSETS, reachableFrom, type Cell } from "./route";
 import { createRng } from "./rng";
 
 /** 0 = valley, 1 = ground, 2 = high ground. */
@@ -24,6 +24,8 @@ export interface LocalMapConfig {
   patrollersPerSegment: number;
   patrolBeatPoints: number; // waypoints on each patroller's loop
   patrolBeatSpacing: number; // waypoints on one loop are at least this many cells apart
+  startTown: number; // the town where the robot begins
+  patrolStartClearCells: number; // no beat comes this close to the start town's centre
   viewCols: number; // the mini map's local window
   viewRows: number;
 }
@@ -237,8 +239,10 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
  * The map is split into a grid of segments, and each segment gets a few patrollers, each walking
  * its own loop of waypoints spread across the segment, ordered round the segment's centre so the
  * loop does not cross itself. Waypoints are open ground (never high ground or a building) that
- * can be walked to from the towns. A segment with too little open ground gets a shorter loop, or
- * none. Drawn from its own stream, so nothing else moves when the patrol rules change.
+ * can be walked to from the towns. No loop, waypoints or the routes between them, comes near the
+ * town where the robot begins, so the game opens in a quiet corner and the player gets the first
+ * look. A segment with too little open ground gets a shorter loop, or none. Drawn from its own
+ * stream, so nothing else moves when the patrol rules change.
  */
 function placePatrollers(map: LocalMap, towns: Town[], targets: readonly Target[], cfg: LocalMapConfig): Target[] {
   const rng = createRng(cfg.worldSeed * 2741 + 5);
@@ -246,6 +250,8 @@ function placePatrollers(map: LocalMap, towns: Town[], targets: readonly Target[
   const occupied = new Set(targets.map((t) => cellKey(map, t.col, t.row)));
   const segW = map.cols / cfg.patrolSegmentsAcross;
   const segH = map.rows / cfg.patrolSegmentsDown;
+  const start = towns[cfg.startTown] ?? towns[0];
+  const clear = (c: Cell) => Math.hypot(c.x - start.x, c.y - start.y) > cfg.patrolStartClearCells;
   const patrollers: Target[] = [];
   for (let sy = 0; sy < cfg.patrolSegmentsDown; sy++) {
     for (let sx = 0; sx < cfg.patrolSegmentsAcross; sx++) {
@@ -255,24 +261,44 @@ function placePatrollers(map: LocalMap, towns: Town[], targets: readonly Target[
       const y1 = Math.floor((sy + 1) * segH) - 1;
       const centre = { x: (x0 + x1) / 2, y: (y0 + y1) / 2 };
       for (let p = 0; p < cfg.patrollersPerSegment; p++) {
-        const beat: Cell[] = [];
-        for (let attempt = 0; attempt < 400 && beat.length < cfg.patrolBeatPoints; attempt++) {
-          const x = x0 + Math.floor(rng() * (x1 - x0 + 1));
-          const y = y0 + Math.floor(rng() * (y1 - y0 + 1));
-          const k = cellKey(map, x, y);
-          if (!reached.has(k) || !isPassable(map, x, y) || occupied.has(k)) continue;
-          if (beat.some((c) => Math.hypot(c.x - x, c.y - y) < cfg.patrolBeatSpacing)) continue;
-          beat.push({ x, y });
+        let beat: Cell[] = [];
+        // A loop whose walk between waypoints strays near the start town is drawn again.
+        for (let tries = 0; tries < 30; tries++) {
+          beat = drawBeat();
+          if (beat.length >= 2 && walkedCells(beat, map).every(clear)) break;
+          beat = [];
         }
         if (beat.length < 2) continue;
-        beat.sort((a, b) => Math.atan2(a.y - centre.y, a.x - centre.x) - Math.atan2(b.y - centre.y, b.x - centre.x));
-        const start = beat[0];
-        occupied.add(cellKey(map, start.x, start.y));
-        patrollers.push({ col: start.x, row: start.y, kind: "patroller", hasDrop: false, network: nearestTown(towns, start), beat });
+        const first = beat[0];
+        occupied.add(cellKey(map, first.x, first.y));
+        patrollers.push({ col: first.x, row: first.y, kind: "patroller", hasDrop: false, network: nearestTown(towns, first), beat });
+
+        /** Waypoints spread across the segment, ordered round its centre. */
+        function drawBeat(): Cell[] {
+          const points: Cell[] = [];
+          for (let attempt = 0; attempt < 400 && points.length < cfg.patrolBeatPoints; attempt++) {
+            const x = x0 + Math.floor(rng() * (x1 - x0 + 1));
+            const y = y0 + Math.floor(rng() * (y1 - y0 + 1));
+            const k = cellKey(map, x, y);
+            if (!reached.has(k) || !isPassable(map, x, y) || occupied.has(k) || !clear({ x, y })) continue;
+            if (points.some((c) => Math.hypot(c.x - x, c.y - y) < cfg.patrolBeatSpacing)) continue;
+            points.push({ x, y });
+          }
+          return points.sort((a, b) => Math.atan2(a.y - centre.y, a.x - centre.x) - Math.atan2(b.y - centre.y, b.x - centre.x));
+        }
       }
     }
   }
   return patrollers;
+}
+
+/** Every cell walked round a loop: the terrain route from each waypoint to the next. */
+export function walkedCells(beat: readonly Cell[], map: LocalMap): Cell[] {
+  const cells: Cell[] = [...beat];
+  beat.forEach((from, i) => {
+    cells.push(...(findRoute(from, beat[(i + 1) % beat.length], map) ?? []));
+  });
+  return cells;
 }
 
 /** The index of the town nearest a cell: a patroller belongs to no network, but every target names one. */

@@ -1,5 +1,5 @@
 import type { Config } from "./config";
-import { generateWorld, inTown, isArmedHelper, isEnemyKind, townCentres, type LocalMap, type Target, type Town } from "./local-map";
+import { generateWorld, inTown, isArmedHelper, isEnemyKind, townCentres, walkedCells, type LocalMap, type Target, type Town } from "./local-map";
 import { createRng } from "./rng";
 import { allWhole, fullPlates, mendWeakest, plateToMend } from "./armour";
 import { canWalk, reachableGoal, stepToward } from "./enemy-move";
@@ -284,8 +284,9 @@ export function createDashboardState(cfg: Config): DashboardState {
 
 /**
  * Where the robot starts (design-notes 4.7): on open ground outside every town, out of
- * sight of every hunter and of every cell a patroller walks on its beat (#66), as near the
- * starting network as that allows, so the player decides when and how to walk in. Searched outward from the starting town by walking
+ * sight of every hunter and of every cell a patroller walks on its beat (#66), and far
+ * enough from the map's edges that the local view is not cut off, as near the starting
+ * network as that allows, so the player decides when and how to walk in. Searched outward from the starting town by walking
  * distance, so the start is always reachable. Falls back to the town centre.
  */
 export function startPosition(world: World, cfg: Config): Point {
@@ -299,7 +300,7 @@ export function startPosition(world: World, cfg: Config): Point {
   for (const t of world.targets) {
     // A defender is asleep in its dome at the start, so only the hunters and patrollers are looking.
     if (t.kind === "hunter") hunters.push({ x: t.col, y: t.row });
-    else if (t.kind === "patroller") beats.push(...beatCells(t.beat ?? [], world));
+    else if (t.kind === "patroller") beats.push(...walkedCells(t.beat ?? [], world.map));
     else if (isBuilding(t)) blocked.add(cellKey(world.map, t.col, t.row));
   }
   const outsideTowns = (x: number, y: number) =>
@@ -307,11 +308,17 @@ export function startPosition(world: World, cfg: Config): Point {
   const clearOf = (cells: Point[], sight: number) => (x: number, y: number) =>
     cells.every((p) => Math.hypot(p.x - x, p.y - y) > sight + clearance);
   const unseenByHunters = clearOf(hunters, world.hunterSightCells);
+  // The local view is centred on the robot: half of it either way must be on the map.
+  const halfCols = Math.floor(world.viewCols / 2);
+  const halfRows = Math.floor(world.viewRows / 2);
+  const inFromEdges = (x: number, y: number) =>
+    x >= halfCols && y >= halfRows && x <= world.map.cols - 1 - halfCols && y <= world.map.rows - 1 - halfRows;
   const offEveryBeat = clearOf(beats, world.patrollerSightCells);
   // Best: out of every hunter's sight and off every beat. On a map whose beats leave no such
   // cell near the start, hunters alone: a patroller may then come by, as it would later anyway.
   const start =
-    nearestCell(world, home, blocked, (x, y) => outsideTowns(x, y) && unseenByHunters(x, y) && offEveryBeat(x, y)) ??
+    nearestCell(world, home, blocked, (x, y) => inFromEdges(x, y) && outsideTowns(x, y) && unseenByHunters(x, y) && offEveryBeat(x, y)) ??
+    nearestCell(world, home, blocked, (x, y) => inFromEdges(x, y) && outsideTowns(x, y) && unseenByHunters(x, y)) ??
     nearestCell(world, home, blocked, (x, y) => outsideTowns(x, y) && unseenByHunters(x, y)) ?? { x: home.x, y: home.y };
   startCache.set(world, start);
   return { ...start };
@@ -339,15 +346,6 @@ function nearestCell(world: World, from: Point, blocked: Blocked, accept: (x: nu
   return null;
 }
 
-/** Every cell a patroller walks on its beat: the terrain route between each waypoint and the next. */
-function beatCells(beat: readonly Point[], world: World): Point[] {
-  const cells: Point[] = [...beat];
-  beat.forEach((from, i) => {
-    const to = beat[(i + 1) % beat.length];
-    cells.push(...(findRoute(from, to, world.map) ?? []));
-  });
-  return cells;
-}
 
 /**
  * True while a cross chooser is open (Missile, Grid Disable or Move): time stops

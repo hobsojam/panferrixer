@@ -58,8 +58,10 @@ describe("every network can be reached", () => {
       })
     );
     const walled = { ...world, map: { ...world.map, tiers } };
-    const cut = unreachableIn(walled, cfg);
-    const inLastTown = world.targets.map((t, i) => ({ t, i })).filter(({ t }) => t.network === world.towns.length - 1).map(({ i }) => i);
+    // Patrollers belong to no network (their network is only the nearest town), so they are left out.
+    const roaming = (i: number) => world.targets[i].kind === "patroller";
+    const cut = unreachableIn(walled, cfg).filter((i) => !roaming(i));
+    const inLastTown = world.targets.map((t, i) => ({ t, i })).filter(({ t, i }) => t.network === world.towns.length - 1 && !roaming(i)).map(({ i }) => i);
     expect(cut).toEqual(inLastTown);
   });
 });
