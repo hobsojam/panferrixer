@@ -5,6 +5,7 @@ import { createDashboardState, stepDashboard, worldFor, type Action, type Dashbo
 import { createDefence, stepDefence, type DefenceState } from "../src/defence";
 import { createInitialState } from "../src/flight";
 import { eventsBetween } from "../src/sound";
+import { platesWith } from "./helpers";
 
 const DT = 1 / 60;
 const world = worldFor(config);
@@ -64,10 +65,10 @@ describe("dashboard sounds", () => {
   });
 
   it("a warning once when shields drop to low", () => {
-    const before = { ...createDashboardState(config), shieldPlates: config.dashboard.lowThreshold + 1 };
-    const after = { ...before, shieldPlates: config.dashboard.lowThreshold };
+    const before = { ...createDashboardState(config), plates: platesWith(config.dashboard.lowThreshold + 1) };
+    const after = { ...before, plates: platesWith(config.dashboard.lowThreshold) };
     expect(eventsBetween(dash(before), dash(after), config)).toEqual(["warning"]);
-    expect(eventsBetween(dash(after), dash({ ...after, shieldPlates: after.shieldPlates - 1 }), config)).toEqual([]);
+    expect(eventsBetween(dash(after), dash({ ...after, plates: platesWith(config.dashboard.lowThreshold - 1) }), config)).toEqual([]);
   });
 });
 

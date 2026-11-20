@@ -1,6 +1,5 @@
 import type { Config } from "./config";
 import {
-  applyShieldHits,
   createDashboardState,
   drainEnergy,
   hunterInRange,
@@ -22,7 +21,8 @@ import {
   type DashboardState,
   type World,
 } from "./dashboard";
-import { createDefence, hitCount, stepDefence, summaryOver, type Aim, type DefenceState } from "./defence";
+import { hitPlate, plateFacing, standing } from "./armour";
+import { createDefence, fanHalfArc, hitBearings, stepDefence, summaryOver, type Aim, type DefenceState } from "./defence";
 import { createInitialState, flightSecondsFor, updateFlight } from "./flight";
 import type { Target } from "./local-map";
 import type { FlightState } from "./types";
@@ -67,20 +67,26 @@ function isResult(phase: FlightState["phase"]): boolean {
   return phase === "hit" || phase === "crash" || phase === "miss";
 }
 
-/** The shields as shown during an attack: plates standing, and hits taken on the top one. */
+/** The armour as shown during an attack: each plate's integrity, and which plate took the last hit. */
 export interface ShieldView {
-  plates: number;
-  hitsOnTop: number;
+  plates: number[];
+  lastHit: number | null;
 }
 
 /**
- * The shields as they stand mid-attack: the dashboard's, less every hit taken so far. Shown
- * live, so each hit is felt when it lands; the same hits are applied to the dashboard once,
- * when the attack ends, so nothing is counted twice.
+ * The armour as it stands mid-attack: the dashboard's, less every hit taken so far, each on
+ * the plate facing it (armour.ts). Shown live, so each hit is felt where it lands; the same
+ * plates are written back to the dashboard once, when the attack ends, so nothing is counted twice.
  */
 export function shieldsDuringAttack(dashboard: DashboardState, defence: DefenceState, cfg: Config): ShieldView {
-  const after = applyShieldHits(dashboard, hitCount(defence), cfg.dashboard.hitsPerPlate);
-  return { plates: after.shieldPlates, hitsOnTop: after.shieldHits };
+  let plates = dashboard.plates;
+  let lastHit: number | null = null;
+  for (const yaw of hitBearings(defence)) {
+    const hit = hitPlate(plates, plateFacing(yaw, plates.length, fanHalfArc(cfg)));
+    plates = hit.plates;
+    if (hit.took >= 0) lastHit = hit.took;
+  }
+  return { plates, lastHit };
 }
 
 /** How far the robot is from a target, in map cells. A hunter may have moved from its post. */
@@ -153,14 +159,15 @@ function updateLive(state: LiveState, input: AppInput, dt: number, cfg: Config, 
     const fire = (input.fire ?? false) || input.actions.includes("activate");
     const defence = stepDefence(state.defence, input.aim ?? { yaw: 0, pitch: 0 }, fire, dt, cfg);
     // Zero shields is death (design-notes 3, item 17), the moment the last plate breaks.
-    if (shieldsDuringAttack(timed, defence, cfg).plates === 0) return { screen: "destroyed", cause: "shields", elapsed: 0, seed: newSeed(), from: null };
+    const shields = shieldsDuringAttack(timed, defence, cfg);
+    if (standing(shields.plates) === 0) return { screen: "destroyed", cause: "shields", elapsed: 0, seed: newSeed(), from: null };
     // Over, but the summary shows for a moment before the dashboard returns by itself.
     if (!summaryOver(defence, cfg)) return { ...state, dashboard: timed, defence };
     // The attack is over: every missile that got through is a hit on the shields. Then a short
     // breather, so the player always has time to open Missile (which stops time) and strike
     // back. The attacker spends one from its magazine, and withdraws to rearm once it is empty
     // (design-notes 4.10).
-    const hit = applyShieldHits(timed, hitCount(defence), cfg.dashboard.hitsPerPlate);
+    const hit: DashboardState = { ...timed, plates: shields.plates };
     const spent = spendAttack(hit, state.attacker, world);
     return { screen: "dashboard", dashboard: { ...spent, breatherUntil: spent.time + world.attackBreatherSeconds } };
   }

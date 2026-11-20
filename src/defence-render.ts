@@ -1,6 +1,7 @@
 import type { Config } from "./config";
-import { HILL_SPAN, HILL_STEP, hitCount, isWarning, missileBearing, missileDistance, shotDistance, type DefenceState } from "./defence";
+import { fanHalfArc, HILL_SPAN, HILL_STEP, hitCount, isWarning, missileBearing, missileDistance, shotDistance, type DefenceState } from "./defence";
 import type { ShieldView } from "./app";
+import { cracksOn, plateFacing, plateTaking } from "./armour";
 import { drawCracks, tracePlate } from "./plates";
 import { drawGlow } from "./render";
 
@@ -137,19 +138,22 @@ export function renderDefence(ctx: CanvasRenderingContext2D, s: DefenceState, sh
 }
 
 /**
- * The shields along the top right, live: a plate for each one the robot started with,
- * filled while it stands, the top one cracked by the hits it has taken. The plate a
+ * The shields along the top right, live: the plates across the robot's front arc, left to
+ * right, each with its own cracks (armour.ts). A plate glows as a missile closes on it, so
+ * the player learns which side each plate guards and can protect a weak one; the plate a
  * missile has just hit flashes, cracked or broken.
  */
 function drawShields(ctx: CanvasRenderingContext2D, s: DefenceState, shields: ShieldView, w: number, cfg: Config): void {
   const c = cfg.colors;
-  const max = cfg.dashboard.shieldPlates;
+  const max = shields.plates.length;
+  const hitsPerPlate = cfg.dashboard.hitsPerPlate;
   const plateW = 22;
   const plateH = 12;
   const gap = 4;
   const right = w - 20;
   const left = right - max * plateW - (max - 1) * gap;
   const y = 20;
+  const xOf = (i: number) => left + i * (plateW + gap);
 
   ctx.fillStyle = c.text;
   ctx.font = "16px monospace";
@@ -157,33 +161,49 @@ function drawShields(ctx: CanvasRenderingContext2D, s: DefenceState, shields: Sh
   ctx.textBaseline = "top";
   ctx.fillText("SHIELDS", left - 10, 18);
 
-  for (let i = 0; i < max; i++) {
-    const x = left + i * (plateW + gap);
-    const standing = i < shields.plates;
-    ctx.globalAlpha = standing ? 1 : 0.18;
+  shields.plates.forEach((p, i) => {
+    const up = p > 0;
+    ctx.globalAlpha = up ? 1 : 0.18;
     ctx.fillStyle = c.shield;
     ctx.strokeStyle = c.shield;
     ctx.lineWidth = 1.5;
-    tracePlate(ctx, x, y, plateW, plateH);
-    if (standing) ctx.fill();
+    tracePlate(ctx, xOf(i), y, plateW, plateH);
+    if (up) ctx.fill();
     ctx.stroke();
-    if (standing && i === shields.plates - 1 && shields.hitsOnTop > 0) drawCracks(ctx, x, y, plateW, plateH, shields.hitsOnTop, c.background);
+    const cracks = cracksOn(p, hitsPerPlate);
+    if (cracks > 0) drawCracks(ctx, xOf(i), y, plateW, plateH, cracks, c.background);
+  });
+  ctx.globalAlpha = 1;
+
+  // Missiles closing in: the plate each will strike glows, brighter as it nears. Only in the
+  // second half of the flight, so the row is not lit up the moment a volley leaves.
+  const closing = new Map<number, number>();
+  for (const m of s.missiles) {
+    if (m.state !== "flying" || m.spawn > s.elapsed) continue;
+    const k = (s.elapsed - m.spawn) / (m.arrive - m.spawn);
+    if (k < 0.5) continue;
+    const plate = plateTaking(shields.plates, plateFacing(m.to.yaw, max, fanHalfArc(cfg)));
+    if (plate >= 0) closing.set(plate, Math.max(closing.get(plate) ?? 0, (k - 0.5) * 2));
+  }
+  for (const [i, k] of closing) {
+    ctx.globalAlpha = 0.3 + 0.7 * k;
+    ctx.strokeStyle = c.alert;
+    ctx.lineWidth = 1.5;
+    tracePlate(ctx, xOf(i) - 2, y - 2, plateW + 4, plateH + 4);
+    ctx.stroke();
   }
   ctx.globalAlpha = 1;
 
-  // The plate just hit flashes: the cracked top plate, or the one that has just broken.
+  // The plate just hit flashes, whether it cracked or broke.
   const lastHit = Math.max(-Infinity, ...s.missiles.filter((m) => m.state === "hit" && m.resolvedAt !== null).map((m) => m.resolvedAt!));
   const age = s.elapsed - lastHit;
-  if (age >= 0 && age < 0.4) {
-    const index = shields.hitsOnTop > 0 ? shields.plates - 1 : shields.plates;
-    if (index >= 0 && index < max) {
-      ctx.globalAlpha = 1 - age / 0.4;
-      ctx.strokeStyle = c.alert;
-      ctx.lineWidth = 3;
-      tracePlate(ctx, left + index * (plateW + gap) - 2, y - 2, plateW + 4, plateH + 4);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
+  if (age >= 0 && age < 0.4 && shields.lastHit !== null) {
+    ctx.globalAlpha = 1 - age / 0.4;
+    ctx.strokeStyle = c.alert;
+    ctx.lineWidth = 3;
+    tracePlate(ctx, xOf(shields.lastHit) - 2, y - 2, plateW + 4, plateH + 4);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
   }
 }
 

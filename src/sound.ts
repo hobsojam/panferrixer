@@ -1,5 +1,6 @@
 import type { Config } from "./config";
 import type { AppState } from "./app";
+import { standing } from "./armour";
 import { isLow, type DashboardState } from "./dashboard";
 import type { DefenceState } from "./defence";
 import type { FlightState } from "./types";
@@ -59,8 +60,8 @@ function dashboardEvents(prev: DashboardState, next: DashboardState, cfg: Config
   }
   if (next.found.length > prev.found.length) events.push("pickup");
 
-  const wasLow = isLow(prev.energyCells, cfg) || isLow(prev.shieldPlates, cfg);
-  const low = isLow(next.energyCells, cfg) || isLow(next.shieldPlates, cfg);
+  const wasLow = isLow(prev.energyCells, cfg) || isLow(standing(prev.plates), cfg);
+  const low = isLow(next.energyCells, cfg) || isLow(standing(next.plates), cfg);
   if (!wasLow && low) events.push("warning");
 
   return events;
