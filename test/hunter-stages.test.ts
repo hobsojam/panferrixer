@@ -44,12 +44,6 @@ describe("hunter stages", () => {
     expect(positionOf(later, hunterIndex, world)).toEqual(post);
   });
 
-  it("an alerted hunter gives up and breaks off when the robot is beyond its leash", () => {
-    const far = { x: post.x + config.dashboard.hunterLeashCells + 5, y: post.y };
-    const s: DashboardState = { ...createDashboardState(config), pos: far, alerted: [hunterIndex], hunterPos: { [hunterIndex]: { x: post.x + config.dashboard.hunterLeashCells + 1, y: post.y } } };
-    const later = moveHunters(s, world, DT);
-    expect(later.alerted).not.toContain(hunterIndex);
-  });
 
   it("a hunter cannot attack again until it has reloaded", () => {
     const s: DashboardState = {
@@ -66,6 +60,66 @@ describe("hunter stages", () => {
   it("a destroyed hunter does not move", () => {
     const s: DashboardState = { ...createDashboardState(config), pos: robotAway(3), alerted: [hunterIndex], ruins: [hunterIndex] };
     expect(positionOf(run(s, 2), hunterIndex, world)).toEqual(post);
+  });
+});
+
+describe("a hunter guards its network (#91)", () => {
+  // One town round (10, 10), its area 7 columns by 4 rows each way: columns 3 to 17 on row 10.
+  // A ridge of high ground runs down column 19, just outside the town, with open ground beyond and
+  // a gap at the top: the long way round, which a hunter free to roam would take.
+  const rows = Array.from({ length: 21 }, (_, y) => "1".repeat(18) + (y === 0 ? "11" : "12") + "1".repeat(20));
+  const HUNTER = 0;
+  const guard: World = {
+    ...world,
+    map: mapOf(rows),
+    towns: [{ x: 10, y: 10 }],
+    townRadiusCols: 7,
+    townRadiusRows: 4,
+    targets: [{ col: 10, row: 10, kind: "hunter", hasDrop: false, network: 0 }],
+  };
+  const inArea = (p: { x: number; y: number }) => ((Math.round(p.x) - 10) / 7) ** 2 + ((Math.round(p.y) - 10) / 4) ** 2 <= 1;
+  const runIn = (s: DashboardState, seconds: number) => {
+    let next = s;
+    for (let i = 0; i < seconds / DT; i++) {
+      next = moveHunters({ ...next, time: next.time + DT }, guard, DT);
+      expect(inArea(positionOf(next, HUNTER, guard)), `left its network at step ${i}`).toBe(true);
+    }
+    return next;
+  };
+
+  it("chasing a robot out of the network, it stops at the edge and stays alerted while the robot is in range", () => {
+    // The robot is 5 cells beyond the edge, across the ridge: further than the hunter would like, but in range.
+    // The hunter has followed it to just short of the edge.
+    const s: DashboardState = { ...createDashboardState(config), pos: { x: 22, y: 10 }, alerted: [HUNTER], hunterPos: { [HUNTER]: { x: 16, y: 10 } } };
+    const later = runIn(s, 10);
+    expect(positionOf(later, HUNTER, guard)).toEqual({ x: 17, y: 10 });
+    expect(later.alerted).toContain(HUNTER);
+  });
+
+  it("attacks over the ridge from where it stands", () => {
+    const s: DashboardState = { ...createDashboardState(config), pos: { x: 22, y: 10 }, alerted: [HUNTER], hunterPos: { [HUNTER]: { x: 17, y: 10 } } };
+    expect(hunterInRange(s, guard, config.dashboard.hunterEngageRange)).toBe(HUNTER);
+  });
+
+  it("drops the alert once the robot is outside the network and beyond its sight and range, and goes home", () => {
+    const s: DashboardState = { ...createDashboardState(config), pos: { x: 30, y: 10 }, alerted: [HUNTER], hunterPos: { [HUNTER]: { x: 17, y: 10 } } };
+    const later = runIn(s, 10);
+    expect(later.alerted).not.toContain(HUNTER);
+    expect(positionOf(later, HUNTER, guard)).toEqual({ x: 10, y: 10 });
+  });
+
+  it("keeps after a robot inside its network, even out of sight", () => {
+    const s: DashboardState = { ...createDashboardState(config), pos: { x: 17, y: 10 }, alerted: [HUNTER], hunterPos: { [HUNTER]: { x: 3, y: 10 } } };
+    const later = runIn(s, 1);
+    expect(later.alerted).toContain(HUNTER);
+    expect(positionOf(later, HUNTER, guard).x).toBeGreaterThan(3);
+  });
+
+  it("a hunter found outside its network walks home", () => {
+    const s: DashboardState = { ...createDashboardState(config), pos: { x: 30, y: 2 }, hunterPos: { [HUNTER]: { x: 17, y: 2 } } };
+    let next = s;
+    for (let i = 0; i < 15 / DT; i++) next = moveHunters({ ...next, time: next.time + DT }, guard, DT);
+    expect(positionOf(next, HUNTER, guard)).toEqual({ x: 10, y: 10 });
   });
 });
 

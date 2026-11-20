@@ -248,9 +248,16 @@ describe("seeing the robot: running for help", () => {
     // Seen far from the defender's dome, beyond its guard area: only the hunter will come.
     const s = state({ pos: { x: 5, y: 5 } });
     expect(nearestHelper(s, PATROLLER, world, { x: 30, y: 2 })).toBe(HUNTER);
-    // Beyond the hunter's leash as well: nobody.
-    const farHunter: World = { ...world, targets: [targets[0], target(39, 20, "hunter")] };
-    expect(nearestHelper(s, PATROLLER, farHunter, { x: 0, y: 0 })).toBeNull();
+  });
+
+  it("fetches a hunter only for a robot in its network or within missile range of its edge (#91)", () => {
+    // The hunter's network is the town round (34, 10): its area runs from column 27 to 41.
+    const guarded: World = { ...world, towns: [{ x: 34, y: 10 }], targets: [targets[0], targets[1]] };
+    const s = state({ pos: { x: 5, y: 5 } });
+    expect(nearestHelper(s, PATROLLER, guarded, { x: 34, y: 10 })).toBe(1); // in the network
+    expect(nearestHelper(s, PATROLLER, guarded, { x: 22, y: 10 })).toBe(1); // 5 cells beyond the edge: in range
+    expect(nearestHelper(s, PATROLLER, guarded, { x: 20, y: 10 })).toBeNull(); // 7 cells beyond: it would not come
+    expect(nearestHelper(s, PATROLLER, guarded, { x: 0, y: 0 })).toBeNull();
   });
 
   it("does not fetch an enemy that is already alerted, destroyed or rearming", () => {

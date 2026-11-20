@@ -57,7 +57,7 @@ export interface World {
   scanPulseSeconds: number; // how long a scan's ring takes to reach its full radius
   blipSeconds: number; // how long a blip stays lit after the ring reaches it
   hunterSpeed: number; // cells per second
-  hunterLeashCells: number; // how far an alerted hunter chases from its post
+  hunterEngageRange: number; // an alerted enemy attacks when the robot is this close, over high ground if need be
   attackBreatherSeconds: number; // after any incoming attack, no enemy may start one for this long (design-notes 4.10)
   hunterMagazineAttacks: number; // attacks a hunter can make before it must rearm
   hunterRearmSeconds: number; // how long rearming takes at a dome
@@ -210,7 +210,7 @@ export function worldFor(cfg: Config): World {
       scanPulseSeconds: cfg.dashboard.scanPulseSeconds,
       blipSeconds: cfg.dashboard.blipSeconds,
       hunterSpeed: cfg.dashboard.hunterSpeed,
-      hunterLeashCells: cfg.dashboard.hunterLeashCells,
+      hunterEngageRange: cfg.dashboard.hunterEngageRange,
       attackBreatherSeconds: cfg.dashboard.attackBreatherSeconds,
       hunterMagazineAttacks: cfg.dashboard.hunterMagazineAttacks,
       hunterRearmSeconds: cfg.dashboard.hunterRearmSeconds,
@@ -491,8 +491,10 @@ export function alertTo(s: DashboardState, indices: readonly number[], world: Wo
 /**
  * Moves the enemies (design-notes 4.10). Every hunter is always looking: one that comes
  * within sight of the robot is alerted, whatever it was doing. An alerted hunter closes
- * to its preferred range and holds there while it attacks, and breaks off once the robot
- * is beyond its leash. While its network's power is cut, a hunter makes rounds of the
+ * to its preferred range and holds there while it attacks, but only over its own network's
+ * ground (#91): it waits at the edge and fires across it, and breaks off once the robot is
+ * outside the network and beyond its sight and range. A fighting patroller is leashed to where
+ * it started fighting instead. While its network's power is cut, a hunter makes rounds of the
  * network's domes, then goes home when the power returns. A hunter that has used its magazine withdraws to a dome, rearms, then
  * goes home no longer alerted. Otherwise it walks back to its post. A destroyed hunter
  * does not move.
@@ -511,14 +513,20 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
       return;
     }
     const defender = t.kind === "defender";
+    const hunter = t.kind === "hunter";
     // A fighting patroller's leash runs from where it started fighting; it has no post to go home to.
     const post = patroller ? (next.patrollers[index]?.anchor ?? { x: t.col, y: t.row }) : { x: t.col, y: t.row };
     const here = positionOf(next, index, world);
-    // A hunter's leash is how far it has come from its post; a defender's guard area is where the robot is.
+    const robotDistance = distanceTo(next.pos, here.x, here.y);
+    // A defender keeps the robot while it is in its guard area, and a patroller while it is on its leash.
+    // A hunter never leaves its network (#91): it keeps the robot while the robot is in the network, or
+    // still within its sight or missile range across the edge.
     const inReach = defender
       ? distanceTo(next.pos, post.x, post.y) <= world.defenderGuardCells
-      : Math.hypot(here.x - post.x, here.y - post.y) <= (patroller ? world.patrollerLeashCells : world.hunterLeashCells);
-    if (inReach && distanceTo(next.pos, here.x, here.y) <= world.hunterSightCells) next = alertTo(next, [index], world); // a rearming enemy is skipped
+      : hunter
+        ? inNetwork(next.pos, t, world) || robotDistance <= Math.max(world.hunterSightCells, world.hunterEngageRange)
+        : Math.hypot(here.x - post.x, here.y - post.y) <= world.patrollerLeashCells;
+    if (inReach && robotDistance <= world.hunterSightCells) next = alertTo(next, [index], world); // a rearming enemy is skipped
     if (next.alerted.includes(index) && !inReach) {
       next = { ...next, alerted: next.alerted.filter((i) => i !== index) };
     }
@@ -556,8 +564,18 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
     } else if (alerted) {
       // Close to the preferred range, then hold. Never halt inside a building: carry on through it.
       const inside = buildingCells(next, world).has(cellKey(world.map, Math.round(here.x), Math.round(here.y)));
-      if (distanceTo(next.pos, here.x, here.y) <= world.hunterHoldCells && !inside) return;
+      if (robotDistance <= world.hunterHoldCells && !inside) return;
       goal = { x: Math.round(next.pos.x), y: Math.round(next.pos.y) };
+      const guarded = hunter ? networkMap(t, world) : null;
+      if (guarded) {
+        // A hunter closes on the robot only over its own network's ground (#91): it heads for the cell
+        // there nearest the robot and waits, firing across the edge if the robot is in range. One that
+        // finds itself outside its network goes home first.
+        const home = inNetwork(here, t, world);
+        const pos = stepToward(here, home ? goal : post, home ? guarded : world.map, world.hunterSpeed * dt);
+        next = { ...next, hunterPos: { ...next.hunterPos, [index]: pos } };
+        return;
+      }
     } else if (patrol?.at) {
       if (here.x === patrol.at.x && here.y === patrol.at.y) return; // its only stop: wait there
       goal = patrol.at;
@@ -649,11 +667,65 @@ function withMind(s: DashboardState, index: number, mind: PatrollerMind): Dashbo
   return { ...s, patrollers: { ...s.patrollers, [index]: mind } };
 }
 
+/** The town an enemy guards: its network's, or none in a world without towns. */
+function homeTown(t: Target, world: World): Town | undefined {
+  return t.network === undefined ? undefined : world.towns[t.network];
+}
+
+/** True when a point lies in the enemy's own network's area. Without a town, everywhere is its ground. */
+function inNetwork(p: Point, t: Target, world: World): boolean {
+  const town = homeTown(t, world);
+  return !town || inTown(town, world.townRadiusCols, world.townRadiusRows, Math.round(p.x), Math.round(p.y));
+}
+
+/** How far a point is from the nearest cell of the enemy's network's area: 0 inside it. */
+export function distanceToNetwork(p: Point, t: Target, world: World): number {
+  const town = homeTown(t, world);
+  if (!town || inNetwork(p, t, world)) return 0;
+  let best = Infinity;
+  for (let y = town.y - world.townRadiusRows; y <= town.y + world.townRadiusRows; y++) {
+    for (let x = town.x - world.townRadiusCols; x <= town.x + world.townRadiusCols; x++) {
+      if (inTown(town, world.townRadiusCols, world.townRadiusRows, x, y)) best = Math.min(best, Math.hypot(p.x - x, p.y - y));
+    }
+  }
+  return best;
+}
+
+/** Network maps per terrain, keyed by town and area size. */
+const networkMaps = new WeakMap<LocalMap, Map<string, LocalMap>>();
+
+/**
+ * The ground a hunter guards (#91): the terrain with everything outside its network's area
+ * made high ground, so the ordinary enemy routing keeps it inside, and a goal outside is
+ * swapped for the nearest cell it can reach within. Built once per network and remembered,
+ * which also lets the route cache work on it. Null in a world without towns.
+ */
+function networkMap(t: Target, world: World): LocalMap | null {
+  const town = homeTown(t, world);
+  if (!town) return null;
+  let known = networkMaps.get(world.map);
+  if (!known) {
+    known = new Map();
+    networkMaps.set(world.map, known);
+  }
+  const key = `${town.x},${town.y},${world.townRadiusCols},${world.townRadiusRows}`;
+  let map = known.get(key);
+  if (!map) {
+    const tiers = world.map.tiers.map((row, y) =>
+      row.map((tier, x) => (inTown(town, world.townRadiusCols, world.townRadiusRows, x, y) ? tier : 2))
+    ) as LocalMap["tiers"];
+    map = { cols: world.map.cols, rows: world.map.rows, tiers };
+    known.set(key, map);
+  }
+  return map;
+}
+
 /**
  * The armed enemy a patroller runs to for help (#66): the nearest hunter or defender that is
  * not destroyed, not already alerted (it is coming anyway), not off rearming (it has nothing
  * to fight with), and that would fight where the robot was seen: inside a defender's guard
- * area, or within a hunter's leash of its post. Help that would turn straight back is no help.
+ * area, or inside a hunter's network or within missile range of its edge (#91). Help that
+ * would turn straight back, or never come, is no help.
  * A defender asleep in its dome counts: the patroller goes to its door and wakes it. Null when
  * there is nobody to fetch. Ties go to the lower index.
  */
@@ -663,8 +735,11 @@ export function nearestHelper(s: DashboardState, index: number, world: World, se
   let bestDistance = Infinity;
   world.targets.forEach((t, i) => {
     if (!isArmedHelper(t.kind) || s.ruins.includes(i) || s.alerted.includes(i) || s.rearming[i]) return;
-    const reach = t.kind === "defender" ? world.defenderGuardCells : world.hunterLeashCells;
-    if (Math.hypot(seen.x - t.col, seen.y - t.row) > reach) return;
+    const engages =
+      t.kind === "defender"
+        ? Math.hypot(seen.x - t.col, seen.y - t.row) <= world.defenderGuardCells
+        : distanceToNetwork(seen, t, world) <= world.hunterEngageRange;
+    if (!engages) return;
     const p = positionOf(s, i, world);
     const d = Math.hypot(p.x - here.x, p.y - here.y);
     if (d < bestDistance) {

@@ -187,7 +187,6 @@ export const config = {
     hunterEngageRange: 6, // in map cells: an alerted hunter opens fire when the robot is this close
     // Placeholders for hunter behaviour (design-notes 4.10 and 4.14). Tuned by playtest.
     hunterSpeed: 2, // cells per second when it moves
-    hunterLeashCells: 30, // how far from its post an alerted hunter will chase before it gives up (about two towns)
     // Attack pacing and turn-taking (design-notes 4.10): the player must always have time to strike back.
     attackBreatherSeconds: 3, // after any incoming attack, no enemy may start one: time to open Missile, which stops time
     hunterMagazineAttacks: 2, // attacks a hunter makes before withdrawing to rearm
