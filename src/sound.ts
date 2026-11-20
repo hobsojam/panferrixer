@@ -26,7 +26,8 @@ export type SoundEvent =
   | "missileDown"
   | "missileHit"
   | "missileLaunch"
-  | "destroyed";
+  | "destroyed"
+  | "powerDown";
 
 /** The sounds that a change between two app states should make. Pure, so it can be tested. */
 export function eventsBetween(prev: AppState, next: AppState, cfg: Config): SoundEvent[] {
@@ -36,7 +37,7 @@ export function eventsBetween(prev: AppState, next: AppState, cfg: Config): Soun
   // The warning beat (design-notes 4.8): a sensor alarm as the attack takes the screen.
   if (prev.screen === "dashboard" && next.screen === "defence") return ["incoming"];
   if (prev.screen === "defence" && next.screen === "defence") return defenceEvents(prev.defence, next.defence);
-  if (prev.screen !== "destroyed" && next.screen === "destroyed") return ["destroyed"];
+  if (prev.screen !== "destroyed" && next.screen === "destroyed") return [next.cause === "energy" ? "powerDown" : "destroyed"];
   return [];
 }
 
@@ -259,6 +260,14 @@ const PLAY: Record<SoundEvent, Player> = {
     noise(c, t, 2.2, 0.9, "lowpass", 800, 40);
     tone(c, t, 120, 1.6, "sine", 0.9, 20);
     noise(c, t + 0.35, 1.2, 0.6, "lowpass", 600, 50);
+  },
+  // Flat batteries: a hum that sags in pitch and stutters out, with a last electrical crackle.
+  powerDown: (c, t) => {
+    tone(c, t, 220, 2.2, "sawtooth", 0.18, 30);
+    tone(c, t, 110, 2.4, "sine", 0.3, 18);
+    noise(c, t + 0.4, 0.08, 0.2, "highpass", 3000, 1500);
+    noise(c, t + 1.1, 0.06, 0.2, "highpass", 3000, 1500);
+    noise(c, t + 1.7, 0.12, 0.25, "highpass", 2500, 800);
   },
   miss: (c, t) => {
     noise(c, t, 0.7, 0.25, "highpass", 2000, 400);

@@ -2,7 +2,9 @@ import type { Config } from "./config";
 import {
   applyShieldHits,
   createDashboardState,
+  drainEnergy,
   hunterInRange,
+  isOutOfEnergy,
   isPaused,
   isShielded,
   leaveTargeting,
@@ -29,14 +31,26 @@ import type { FlightState } from "./types";
  * The screens. The dashboard is persistent: a missile flight or a hunter's attack is
  * opened from it and returns to it, keeping the dashboard's selection and location.
  * `shielded` is decided at launch: it is the state of the network's shields when the missile was fired.
- * `destroyed` is death (design-notes 3, item 17): the last shield plate broke during an attack.
- * It leads only to a fresh game; there are no saves yet.
+ * `destroyed` is death (design-notes 3, items 17 and 18), with its cause: the last shield plate
+ * broke during an attack, or the batteries ran flat. A power-down keeps the screen the robot
+ * was on (`from`), frozen, so it can flicker and fade. Death leads only to a fresh game; there
+ * are no saves yet.
  */
-export type AppState =
+export type AppState = LiveState | { screen: "destroyed"; cause: DeathCause; elapsed: number; seed: number; from: LiveState | null };
+
+/** Every screen on which the robot is still running. */
+export type LiveState =
   | { screen: "dashboard"; dashboard: DashboardState }
   | { screen: "flight"; dashboard: DashboardState; flight: FlightState; target: Target; targetIndex: number; shielded: boolean }
-  | { screen: "defence"; dashboard: DashboardState; defence: DefenceState; attacker: number }
-  | { screen: "destroyed"; elapsed: number; seed: number };
+  | { screen: "defence"; dashboard: DashboardState; defence: DefenceState; attacker: number };
+
+/** Why the robot stopped: shields gone, or energy gone. */
+export type DeathCause = "shields" | "energy";
+
+/** How long the death screen shows before a press can start a new game. */
+export function restartAfter(cause: DeathCause, cfg: Config): number {
+  return cause === "energy" ? cfg.death.powerDownSeconds + cfg.death.restartAfterSeconds : cfg.death.restartAfterSeconds;
+}
 
 export interface AppInput {
   actions: readonly Action[]; // discrete presses this step; ignored during flight
@@ -75,7 +89,10 @@ function rangeTo(dashboard: DashboardState, index: number, world: World): number
   return Math.hypot(p.x - dashboard.pos.x, p.y - dashboard.pos.y);
 }
 
-/** Pure fixed-timestep update for the whole app. */
+/**
+ * Pure fixed-timestep update for the whole app. Zero energy is death (design-notes 3, item 18)
+ * on whichever screen the batteries run flat, so it is checked once, after the screen's own step.
+ */
 export function updateApp(
   state: AppState,
   input: AppInput,
@@ -83,14 +100,21 @@ export function updateApp(
   cfg: Config,
   newSeed: () => number
 ): AppState {
-  const world = worldFor(cfg);
-
   if (state.screen === "destroyed") {
     // The wreck shows for a moment; after that a press starts a new game from the beginning.
     const elapsed = state.elapsed + dt;
-    if (elapsed >= cfg.death.restartAfterSeconds && input.actions.includes("activate")) return createAppState(cfg);
+    if (elapsed >= restartAfter(state.cause, cfg) && input.actions.includes("activate")) return createAppState(cfg);
     return { ...state, elapsed };
   }
+  const next = updateLive(state, input, dt, cfg, newSeed);
+  if (next.screen !== "destroyed" && isOutOfEnergy(next.dashboard)) {
+    return { screen: "destroyed", cause: "energy", elapsed: 0, seed: newSeed(), from: next };
+  }
+  return next;
+}
+
+function updateLive(state: LiveState, input: AppInput, dt: number, cfg: Config, newSeed: () => number): AppState {
+  const world = worldFor(cfg);
 
   if (state.screen === "dashboard") {
     const step = stepDashboard(state.dashboard, input.actions, dt, world);
@@ -124,12 +148,12 @@ export function updateApp(
 
   if (state.screen === "defence") {
     // The shield clock and the hunters run during an attack, as they do during a flight.
-    const timed = moveHunters({ ...state.dashboard, time: state.dashboard.time + dt }, world, dt);
+    const timed = moveHunters(drainEnergy({ ...state.dashboard, time: state.dashboard.time + dt }, dt, 0, world), world, dt);
     // A fresh press fires as well as holding, so a quick tap is never lost between steps.
     const fire = (input.fire ?? false) || input.actions.includes("activate");
     const defence = stepDefence(state.defence, input.aim ?? { yaw: 0, pitch: 0 }, fire, dt, cfg);
     // Zero shields is death (design-notes 3, item 17), the moment the last plate breaks.
-    if (shieldsDuringAttack(timed, defence, cfg).plates === 0) return { screen: "destroyed", elapsed: 0, seed: newSeed() };
+    if (shieldsDuringAttack(timed, defence, cfg).plates === 0) return { screen: "destroyed", cause: "shields", elapsed: 0, seed: newSeed(), from: null };
     // Over, but the summary shows for a moment before the dashboard returns by itself.
     if (!summaryOver(defence, cfg)) return { ...state, dashboard: timed, defence };
     // The attack is over: every missile that got through is a hit on the shields. Then a short
@@ -152,8 +176,8 @@ export function updateApp(
     return { screen: "dashboard", dashboard: startHeldWaits(ruined, world) };
   }
 
-  // The shield clock runs in real time, so it keeps running while a missile is in the air.
-  const timed: DashboardState = moveHunters({ ...state.dashboard, time: state.dashboard.time + dt }, world, dt);
+  // The shield clock and the batteries run in real time, so they keep running while a missile is in the air.
+  const timed: DashboardState = moveHunters(drainEnergy({ ...state.dashboard, time: state.dashboard.time + dt }, dt, 0, world), world, dt);
   const flight = updateFlight(state.flight, input.steering, dt, cfg);
 
   // A hit on a power station takes its network's shields down. The station itself survives.

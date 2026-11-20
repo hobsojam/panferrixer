@@ -35,6 +35,13 @@ const flatWorld: World = {
   defenderGuardCells: config.dashboard.defenderGuardCells,
   viewCols: config.localMap.viewCols,
   viewRows: config.localMap.viewRows,
+  energyMax: config.dashboard.energyCells,
+  shieldMax: config.dashboard.shieldPlates,
+  hitsPerPlate: config.dashboard.hitsPerPlate,
+  energyDrainPerSecond: config.energy.drainPerSecond,
+  energyPerCellWalked: config.energy.perCellWalked,
+  energyDropCells: config.energy.dropCells,
+  armourDropPlates: config.energy.armourDropPlates,
 };
 
 function step(state: DashboardState, actions: Action[], dt = DT, w: World = flatWorld): DashboardState {
