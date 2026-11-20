@@ -1,3 +1,4 @@
+import { cracksOn, standing } from "./armour";
 import { ART, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
 import { AVAILABLE_VERBS, VERB_GRID, blipStrength, buildingCells, gridDisableReady, isHidden, isInsideBuilding, isLow, isPaused, isSuppressed, positionOf, ringReach, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
@@ -35,8 +36,8 @@ export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardS
   drawTracePanel(ctx, state, cfg);
   drawVerbGrid(ctx, state, cfg);
   drawSidePanel(ctx, state, world, cfg);
-  drawGauge(ctx, "ENERGY", state.energyCells, cfg.dashboard.energyCells, 330, cfg, "cell", state.time);
-  drawGauge(ctx, "SHIELDS", state.shieldPlates, cfg.dashboard.shieldPlates, 384, cfg, "plate", state.time, state.shieldHits);
+  drawGauge(ctx, "ENERGY", energyUnits(state.energyCells, cfg.dashboard.energyCells, cfg), 330, cfg, "cell", state.time);
+  drawGauge(ctx, "SHIELDS", plateUnits(state.plates, cfg), 384, cfg, "plate", state.time);
   if (isLow(state.energyCells, cfg)) drawLowPower(ctx, state.time, cfg);
 
   drawText(ctx, hintFor(state, soundOn), w / 2, h - 28, 14, c.text, 0.8, "monospace");
@@ -74,7 +75,7 @@ function drawTracePanel(ctx: CanvasRenderingContext2D, state: DashboardState, cf
   drawPanelFrame(ctx, x, PANEL_TOP, width, height, c.panelDim);
   drawText(ctx, "STATE", x + 10, PANEL_TOP + 14, 12, c.text, 0.7, "monospace", "left");
 
-  const low = isLow(state.energyCells, cfg) || isLow(state.shieldPlates, cfg);
+  const low = isLow(state.energyCells, cfg) || isLow(standing(state.plates), cfg);
   const agitation = low ? 1.8 : 1;
   const points = cfg.dashboard.tracePoints;
   const midY = PANEL_TOP + height * 0.6;
@@ -562,54 +563,58 @@ function drawLowPower(ctx: CanvasRenderingContext2D, time: number, cfg: Config):
   drawText(ctx, "LOW POWER", cfg.canvas.width / 2, 316, 15, cfg.colors.alert, 1, "monospace");
 }
 
+/** One unit of a gauge: how full it is (0..1), cracks to draw on it, and whether it flashes. */
+interface GaugeUnit {
+  part: number;
+  cracks: number;
+  flash: boolean;
+}
+
 /**
- * A row of units: energy as rectangular cells, shields as trapezoid plates. Energy is
- * fractional, so the current cell shows how much of it is left. The last filled unit flashes
- * when the row is low.
+ * Energy as rectangular cells. It is fractional, so the current cell shows how much of it is
+ * left. The last cell flashes when the bank is low.
  */
-function drawGauge(
-  ctx: CanvasRenderingContext2D,
-  label: string,
-  count: number,
-  max: number,
-  y: number,
-  cfg: Config,
-  shape: "cell" | "plate",
-  time: number,
-  hitsOnTop = 0 // plates only: hits the top plate has taken, shown as cracks
-): void {
+function energyUnits(count: number, max: number, cfg: Config): GaugeUnit[] {
+  const low = isLow(count, cfg);
+  const top = Math.ceil(count) - 1;
+  return Array.from({ length: max }, (_, i) => ({ part: Math.max(0, Math.min(1, count - i)), cracks: 0, flash: low && i === top }));
+}
+
+/**
+ * Armour as trapezoid plates across the front arc, left to right (armour.ts): each standing
+ * plate shows its own cracks. When few stand, every standing plate flashes.
+ */
+function plateUnits(plates: readonly number[], cfg: Config): GaugeUnit[] {
+  const low = isLow(standing(plates), cfg);
+  return plates.map((p) => ({ part: p > 0 ? 1 : 0, cracks: cracksOn(p, cfg.dashboard.hitsPerPlate), flash: low && p > 0 }));
+}
+
+/** A row of gauge units with its label. */
+function drawGauge(ctx: CanvasRenderingContext2D, label: string, units: readonly GaugeUnit[], y: number, cfg: Config, shape: "cell" | "plate", time: number): void {
   const c = cfg.colors;
   const color = shape === "cell" ? c.energy : c.shield;
   const left = 150;
   const right = cfg.canvas.width - 20;
   const gap = 8;
   const height = 34;
+  const max = units.length;
   const unitW = (right - left - gap * (max - 1)) / max;
-  const low = isLow(count, cfg);
 
   drawText(ctx, label, 20, y + height / 2, 14, c.text, 1, "monospace", "left");
 
-  const top = Math.ceil(count) - 1;
-  for (let i = 0; i < max; i++) {
+  units.forEach((u, i) => {
     const x = left + i * (unitW + gap);
-    const part = Math.max(0, Math.min(1, count - i));
-    const filled = part > 0;
-    const isLastFilled = filled && i === top;
-    let alpha = filled ? 1 : 0.18;
-    if (isLastFilled && low) {
-      alpha = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(time * 9));
-    }
-
-    ctx.globalAlpha = alpha;
+    const filled = u.part > 0;
+    ctx.globalAlpha = !filled ? 0.18 : u.flash ? 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(time * 9)) : 1;
     ctx.fillStyle = color;
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.5;
     traceUnit(ctx, shape, x, y, unitW, height);
-    if (filled && part < 1 && shape === "cell") ctx.fillRect(x, y, unitW * part, height);
+    if (filled && u.part < 1 && shape === "cell") ctx.fillRect(x, y, unitW * u.part, height);
     else if (filled) ctx.fill();
     ctx.stroke();
-    if (shape === "plate" && isLastFilled && hitsOnTop > 0) drawCracks(ctx, x, y, unitW, height, hitsOnTop, c.background);
-  }
+    if (u.cracks > 0) drawCracks(ctx, x, y, unitW, height, u.cracks, c.background);
+  });
   ctx.globalAlpha = 1;
 }
 

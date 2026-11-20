@@ -110,7 +110,7 @@ export const config = {
     drainPerSecond: 1 / 90, // a cell every 90 seconds of running time: 15 minutes from full, standing still
     perCellWalked: 0.02, // walking the width of the map costs about one and a half cells more
     dropCells: 2, // an energy drop restores two cells (design-notes 4.6)
-    armourDropPlates: 2, // an armour drop restores two plates, about one average attack (design-notes 4.9)
+    armourDropPlates: 2, // an armour drop fully mends the two weakest plates, broken ones first (design-notes 4.9)
   },
 
   // Missile defence (design-notes 2.9a, 4.8, 4.9). Placeholders, tuned by playtest.

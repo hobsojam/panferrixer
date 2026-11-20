@@ -1,6 +1,7 @@
 import type { Config } from "./config";
 import { generateWorld, inTown, isEnemyKind, townCentres, type LocalMap, type Target, type Town } from "./local-map";
 import { createRng } from "./rng";
+import { allWhole, fullPlates, mendWeakest } from "./armour";
 import { canWalk, stepToward } from "./enemy-move";
 import { cellKey, findRoute, findRouteToAny, isPassable, OFFSETS, walkPoint, type Blocked } from "./route";
 
@@ -70,7 +71,6 @@ export interface World {
   viewRows: number;
   // The energy and shield economy (#15). Energy is a slow clock: it drains with time and walking.
   energyMax: number; // battery cells when full
-  shieldMax: number; // armour plates when full
   hitsPerPlate: number;
   energyDrainPerSecond: number; // cells drained per second of running time, standing or not
   energyPerCellWalked: number; // extra cells drained per map cell walked
@@ -82,7 +82,9 @@ export interface DashboardState {
   row: number;
   col: number;
   energyCells: number; // fractional: energy drains gradually within the current cell
-  shieldPlates: number;
+  // The armour plates across the robot's front arc, left to right: each one's integrity, from
+  // hitsPerPlate (whole) down to 0 (broken). See armour.ts.
+  plates: number[];
   time: number; // seconds on the dashboard; drives the state-of-mind trace
   location: number; // index of the town the robot is in; the last one it was in when between towns
   mode: "browse" | "targeting" | "moving";
@@ -117,8 +119,6 @@ export interface DashboardState {
   attacksUsed: Record<number, number>;
   // Dashboard time until which no enemy may start an attack: the breather after an attack.
   breatherUntil: number;
-  // Hits taken on the top shield plate so far. A plate goes when it reaches hitsPerPlate.
-  shieldHits: number;
   // Defenders (target indices) woken out of their domes. The rest are hidden inside (design-notes 4.4).
   awake: number[];
   // Defenders woken during a flight whose first-attack wait starts when the player is back at the dashboard.
@@ -183,7 +183,6 @@ export function worldFor(cfg: Config): World {
       viewCols: cfg.localMap.viewCols,
       viewRows: cfg.localMap.viewRows,
       energyMax: cfg.dashboard.energyCells,
-      shieldMax: cfg.dashboard.shieldPlates,
       hitsPerPlate: cfg.dashboard.hitsPerPlate,
       energyDrainPerSecond: cfg.energy.drainPerSecond,
       energyPerCellWalked: cfg.energy.perCellWalked,
@@ -200,7 +199,7 @@ export function createDashboardState(cfg: Config): DashboardState {
     row: 0,
     col: 0,
     energyCells: cfg.dashboard.energyCells,
-    shieldPlates: cfg.dashboard.shieldPlates,
+    plates: fullPlates(cfg.dashboard.shieldPlates, cfg.dashboard.hitsPerPlate),
     time: 0,
     location: cfg.dashboard.startNode,
     mode: "browse",
@@ -224,7 +223,6 @@ export function createDashboardState(cfg: Config): DashboardState {
     rearming: {},
     attacksUsed: {},
     breatherUntil: 0,
-    shieldHits: 0,
     awake: [],
     heldAttacks: [],
   };
@@ -651,19 +649,6 @@ export function hunterInRange(s: DashboardState, world: World, range: number): n
   return null;
 }
 
-/** Applies missile hits to the shields: each plate absorbs hitsPerPlate hits, then breaks. */
-export function applyShieldHits(s: DashboardState, hits: number, hitsPerPlate: number): DashboardState {
-  let plates = s.shieldPlates;
-  let shieldHits = s.shieldHits;
-  for (let i = 0; i < hits && plates > 0; i++) {
-    shieldHits += 1;
-    if (shieldHits >= hitsPerPlate) {
-      plates -= 1;
-      shieldHits = 0;
-    }
-  }
-  return { ...s, shieldPlates: plates, shieldHits };
-}
 
 /** Grid disable is ready once its cooldown has passed. */
 export function gridDisableReady(state: DashboardState): boolean {
@@ -810,15 +795,13 @@ export function dropKind(target: Target, index: number): DropKind {
 /** Whether a drop would be wasted: energy at a full bank, armour with every plate whole. */
 function wouldWaste(s: DashboardState, kind: DropKind, world: World): boolean {
   if (kind === "energy") return s.energyCells >= world.energyMax;
-  return s.shieldPlates >= world.shieldMax && s.shieldHits === 0;
+  return allWhole(s.plates, world.hitsPerPlate);
 }
 
-/** Energy adds cells; armour adds whole plates and, once full, mends the cracks on the top one. */
+/** Energy adds cells; armour fully mends the weakest plates, broken ones first. */
 function applyDrop(s: DashboardState, kind: DropKind, world: World): DashboardState {
   if (kind === "energy") return { ...s, energyCells: Math.min(world.energyMax, s.energyCells + world.energyDropCells) };
-  const plates = s.shieldPlates + world.armourDropPlates;
-  if (plates >= world.shieldMax) return { ...s, shieldPlates: world.shieldMax, shieldHits: 0 };
-  return { ...s, shieldPlates: plates };
+  return { ...s, plates: mendWeakest(s.plates, world.armourDropPlates, world.hitsPerPlate) };
 }
 
 /**

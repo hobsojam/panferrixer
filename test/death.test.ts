@@ -5,6 +5,7 @@ import { createDashboardState, worldFor } from "../src/dashboard";
 import { createDefence, hitCount } from "../src/defence";
 import { createInputGate, gateInput } from "../src/input-gate";
 import { eventsBetween } from "../src/sound";
+import { platesWith } from "./helpers";
 
 // Zero shields is death (design-notes 3, item 17), and death starts the game again (#41).
 const DT = 1 / 60;
@@ -16,7 +17,7 @@ const hunterIndex = world.targets.findIndex((t) => t.kind === "hunter");
 
 /** An attack under way, with the robot down to `plates` plates and no hits on the top one. Nobody fires back. */
 function underAttack(plates: number): AppState {
-  return { screen: "defence", dashboard: { ...createDashboardState(config), shieldPlates: plates, shieldHits: 0 }, defence: createDefence(3, config), attacker: hunterIndex };
+  return { screen: "defence", dashboard: { ...createDashboardState(config), plates: platesWith(plates) }, defence: createDefence(3, config), attacker: hunterIndex };
 }
 
 function runUntil(s: AppState, done: (s: AppState) => boolean, seconds = 30): AppState {

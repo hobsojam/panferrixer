@@ -82,7 +82,7 @@ export function createDefence(seed: number, cfg: Config, rangeCells: number = cf
         from: launcher,
         // Never beyond the arc, so every missile can be turned toward.
         to: {
-          yaw: rangeFloat(rng, -1, 1) * Math.min(d.fanYawDegrees, d.arcYawDegrees),
+          yaw: rangeFloat(rng, -1, 1) * fanHalfArc(cfg),
           pitch: rangeFloat(rng, d.fanPitchMinDegrees, Math.min(d.fanPitchMaxDegrees, d.arcPitchUpDegrees)),
         },
         launchDistance: d.launchDistance,
@@ -199,6 +199,19 @@ export function summaryOver(s: DefenceState, cfg: Config): boolean {
 /** Missiles that got through: each one is a hit on the shields. */
 export function hitCount(s: DefenceState): number {
   return s.missiles.filter((m) => m.state === "hit").length;
+}
+
+/** How far left or right of the launcher a missile can arrive: the arc the plates cover (#82). */
+export function fanHalfArc(cfg: Config): number {
+  return Math.min(cfg.defence.fanYawDegrees, cfg.defence.arcYawDegrees);
+}
+
+/** The arrival bearings (yaw) of the missiles that got through, in the order they landed. */
+export function hitBearings(s: DefenceState): number[] {
+  return s.missiles
+    .filter((m) => m.state === "hit")
+    .sort((a, b) => (a.resolvedAt ?? 0) - (b.resolvedAt ?? 0))
+    .map((m) => m.to.yaw);
 }
 
 function clamp(v: number, min: number, max: number): number {

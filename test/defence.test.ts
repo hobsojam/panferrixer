@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
-import { alertHunters, applyShieldHits, createDashboardState, hunterInRange, isShielded, networkOf, stepDashboard, worldFor, type DashboardState } from "../src/dashboard";
+import { alertHunters, createDashboardState, hunterInRange, isShielded, networkOf, stepDashboard, worldFor } from "../src/dashboard";
 import { combineAim, createDefence, hitCount, isWarning, missileBearing, missileDistance, mouseAim, stepDefence, type DefenceState, type Missile } from "../src/defence";
 
 const DT = 1 / 60;
@@ -206,23 +206,6 @@ describe("balance", () => {
   });
 });
 
-describe("shield hits", () => {
-  it("three hits take one plate, and two hits leave the top plate cracked", () => {
-    const base: DashboardState = createDashboardState(config);
-    const three = applyShieldHits(base, 3, 3);
-    expect(three.shieldPlates).toBe(config.dashboard.shieldPlates - 1);
-    expect(three.shieldHits).toBe(0);
-    const two = applyShieldHits(base, 2, 3);
-    expect(two.shieldPlates).toBe(config.dashboard.shieldPlates);
-    expect(two.shieldHits).toBe(2);
-  });
-
-  it("plates never go below zero", () => {
-    const base = createDashboardState(config);
-    expect(applyShieldHits(base, 1000, 3).shieldPlates).toBe(0);
-  });
-});
-
 describe("hunters", () => {
   it("every network has exactly one hunter", () => {
     world.towns.forEach((_, network) => {
@@ -284,8 +267,8 @@ describe("the attack from the app", () => {
     if (state.screen !== "dashboard") return;
 
     const total = createDefence(seed, config).missiles.length;
-    // Shield points left: each plate is worth hitsPerPlate, less the hits on the top plate.
-    const pointsLeft = state.dashboard.shieldPlates * config.dashboard.hitsPerPlate - state.dashboard.shieldHits;
+    // Every missile got through, and each one took one point of integrity from some plate.
+    const pointsLeft = state.dashboard.plates.reduce((a, b) => a + b, 0);
     expect(config.dashboard.shieldPlates * config.dashboard.hitsPerPlate - pointsLeft).toBe(total);
     // The alert stays: the hunter keeps coming until it leaves its leash or dies.
     expect(state.dashboard.alerted).toContain(hunterIndex);

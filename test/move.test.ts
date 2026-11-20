@@ -36,7 +36,6 @@ const flatWorld: World = {
   viewCols: config.localMap.viewCols,
   viewRows: config.localMap.viewRows,
   energyMax: config.dashboard.energyCells,
-  shieldMax: config.dashboard.shieldPlates,
   hitsPerPlate: config.dashboard.hitsPerPlate,
   energyDrainPerSecond: config.energy.drainPerSecond,
   energyPerCellWalked: config.energy.perCellWalked,

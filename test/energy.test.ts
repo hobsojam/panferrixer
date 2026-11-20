@@ -143,24 +143,21 @@ describe("drops refill energy and armour", () => {
     expect(next.energyCells).toBe(FULL);
   });
 
-  it("an armour drop restores plates", () => {
-    const next = stepDashboard(onDrop("armour", { shieldPlates: 3, shieldHits: 2 }), [], DT, world).state;
-    expect(next.shieldPlates).toBe(3 + config.energy.armourDropPlates);
-    expect(next.shieldHits).toBe(2);
+  it("an armour drop mends the weakest plates, broken ones first", () => {
+    const next = stepDashboard(onDrop("armour", { plates: [3, 0, 2, 3, 0, 1, 3, 0] }), [], DT, world).state;
+    expect(next.plates).toEqual([3, 3, 2, 3, 3, 1, 3, 0]);
   });
 
-  it("an armour drop that reaches full also mends the cracks", () => {
-    const max = config.dashboard.shieldPlates;
-    const next = stepDashboard(onDrop("armour", { shieldPlates: max - 1, shieldHits: 2 }), [], DT, world).state;
-    expect(next.shieldPlates).toBe(max);
-    expect(next.shieldHits).toBe(0);
+  it("with no plate broken, an armour drop mends the most cracked", () => {
+    const next = stepDashboard(onDrop("armour", { plates: [3, 2, 1, 3, 3, 1, 3, 3] }), [], DT, world).state;
+    expect(next.plates).toEqual([3, 2, 3, 3, 3, 3, 3, 3]);
   });
 
   it("a drop that would be wasted is left for later", () => {
     const next = stepDashboard(onDrop("armour", {}), [], DT, world).state;
     expect(next.found).toEqual([]);
     // Once damaged, the same drop is taken.
-    const later = stepDashboard({ ...next, shieldHits: 1 }, [], DT, world).state;
+    const later = stepDashboard({ ...next, plates: [3, 3, 3, 2, 3, 3, 3, 3] }, [], DT, world).state;
     expect(later.found).toEqual([indexOf("armour")]);
   });
 });
