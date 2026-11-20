@@ -197,6 +197,17 @@ export const config = {
     // Defenders (design-notes 4.4 and 4.10): woken out of their dome, they guard it. Placeholders.
     defenderSpeed: 2, // cells per second
     defenderGuardCells: 12, // the guard area: an awake defender sees and chases the robot only this close to its post. Covers the missile's reach across the local view, so a dome cannot be opened from outside it
+    // Patrollers (#66, design-notes 4.10): they walk a wide beat, come to look at disturbances, and
+    // on seeing the robot run to the nearest armed enemy for help. Lightly armed. Placeholders.
+    patrollerSpeed: 2, // cells per second on its beat, investigating, or fighting
+    patrollerRunSpeed: 3.5, // cells per second while running for help: "sent at speed"
+    patrollerSightCells: 5, // like a hunter, it is always looking
+    patrollerHearingCells: 15, // a missile hit or a power cut this close draws it in to look
+    patrollerSearchSeconds: 6, // how long it looks round a disturbance before going back to its beat
+    patrollerHelpReachCells: 1.5, // this close to the enemy it fetches, help is raised
+    patrollerLeashCells: 15, // once fighting, how far it follows the robot from where it started
+    patrollerMagazineAttacks: 2, // attacks before it withdraws to rearm
+    patrollerVolleys: 1, // lightly armed: one volley per attack, against a hunter's three
     startClearanceCells: 2, // the robot starts at least this far outside a town and beyond any hunter's sight
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
@@ -216,6 +227,12 @@ export const config = {
     otherBuildingsPerTown: 1, // a mine or a comms centre
     defendersMax: 4, // design-notes 4.4: each network draws 0 to 4 defenders
     dropChance: 0.5, // placeholder: not every building holds a drop (design-notes 2.6)
+    // Patrollers (#66): wide beats between the towns, a few in each segment of the map. Placeholders.
+    patrolSegmentsAcross: 3,
+    patrolSegmentsDown: 2,
+    patrollersPerSegment: 2,
+    patrolBeatPoints: 4, // waypoints on each patroller's loop
+    patrolBeatSpacing: 8, // waypoints on one loop are at least this many cells apart
     viewCols: 25, // the mini map's local window, in cells
     viewRows: 11,
   },

@@ -18,6 +18,7 @@ const TARGET_LABELS: Record<Target["kind"], string> = {
   power: "POWER",
   hunter: "HUNTER",
   defender: "DEFENDER",
+  patroller: "PATROLLER",
   mine: "MINE",
   commsCentre: "COMMS CENTRE",
   dome: "DOME",

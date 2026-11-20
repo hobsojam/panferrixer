@@ -18,6 +18,12 @@ export interface LocalMapConfig {
   otherBuildingsPerTown: number; // mines and comms centres, drawn at random
   defendersMax: number; // each network draws 0 to this many defenders, one per dome at most
   dropChance: number; // chance that a building holds a drop
+  // Patrollers (#66) walk wide beats across the map, a few in each segment of a grid laid over it.
+  patrolSegmentsAcross: number;
+  patrolSegmentsDown: number;
+  patrollersPerSegment: number;
+  patrolBeatPoints: number; // waypoints on each patroller's loop
+  patrolBeatSpacing: number; // waypoints on one loop are at least this many cells apart
   viewCols: number; // the mini map's local window
   viewRows: number;
 }
@@ -35,7 +41,7 @@ export interface Town {
 }
 
 /** Placeholder target kinds: the comms centre replaces the original beacon (design-notes 4.4). Art is not designed yet. */
-export type TargetKind = "power" | "hunter" | "defender" | "mine" | "commsCentre" | "dome";
+export type TargetKind = "power" | "hunter" | "defender" | "patroller" | "mine" | "commsCentre" | "dome";
 
 export interface Target {
   col: number;
@@ -44,10 +50,16 @@ export interface Target {
   hasDrop: boolean; // the drop is hidden under the building; found only once it is destroyed
   network: number; // the town (network) it was placed in. Towns can overlap, so position alone does not say
   home?: number; // a defender's dome (target index); its col and row are the free cell beside it, its post
+  beat?: Cell[]; // a patroller's loop of waypoints; its col and row are the first, where it starts
 }
 
 /** True for the enemies: they move, have no shields and are not buildings. */
 export function isEnemyKind(kind: TargetKind): boolean {
+  return kind === "hunter" || kind === "defender" || kind === "patroller";
+}
+
+/** True for the enemies that carry weapons worth calling for help: not the patroller's light guns. */
+export function isArmedHelper(kind: TargetKind): boolean {
   return kind === "hunter" || kind === "defender";
 }
 
@@ -216,7 +228,60 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
       placed += 1;
     }
   }
-  return [...targets, ...placeDefenders(map, towns, targets, cfg)];
+  const withGarrisons = [...targets, ...placeDefenders(map, towns, targets, cfg)];
+  return [...withGarrisons, ...placePatrollers(map, towns, withGarrisons, cfg)];
+}
+
+/**
+ * The patrollers (#66): the hunter guards its network, so patrollers cover the ground between.
+ * The map is split into a grid of segments, and each segment gets a few patrollers, each walking
+ * its own loop of waypoints spread across the segment, ordered round the segment's centre so the
+ * loop does not cross itself. Waypoints are open ground (never high ground or a building) that
+ * can be walked to from the towns. A segment with too little open ground gets a shorter loop, or
+ * none. Drawn from its own stream, so nothing else moves when the patrol rules change.
+ */
+function placePatrollers(map: LocalMap, towns: Town[], targets: readonly Target[], cfg: LocalMapConfig): Target[] {
+  const rng = createRng(cfg.worldSeed * 2741 + 5);
+  const reached = reachableFrom(towns[0], map);
+  const occupied = new Set(targets.map((t) => cellKey(map, t.col, t.row)));
+  const segW = map.cols / cfg.patrolSegmentsAcross;
+  const segH = map.rows / cfg.patrolSegmentsDown;
+  const patrollers: Target[] = [];
+  for (let sy = 0; sy < cfg.patrolSegmentsDown; sy++) {
+    for (let sx = 0; sx < cfg.patrolSegmentsAcross; sx++) {
+      const x0 = Math.floor(sx * segW);
+      const y0 = Math.floor(sy * segH);
+      const x1 = Math.floor((sx + 1) * segW) - 1;
+      const y1 = Math.floor((sy + 1) * segH) - 1;
+      const centre = { x: (x0 + x1) / 2, y: (y0 + y1) / 2 };
+      for (let p = 0; p < cfg.patrollersPerSegment; p++) {
+        const beat: Cell[] = [];
+        for (let attempt = 0; attempt < 400 && beat.length < cfg.patrolBeatPoints; attempt++) {
+          const x = x0 + Math.floor(rng() * (x1 - x0 + 1));
+          const y = y0 + Math.floor(rng() * (y1 - y0 + 1));
+          const k = cellKey(map, x, y);
+          if (!reached.has(k) || !isPassable(map, x, y) || occupied.has(k)) continue;
+          if (beat.some((c) => Math.hypot(c.x - x, c.y - y) < cfg.patrolBeatSpacing)) continue;
+          beat.push({ x, y });
+        }
+        if (beat.length < 2) continue;
+        beat.sort((a, b) => Math.atan2(a.y - centre.y, a.x - centre.x) - Math.atan2(b.y - centre.y, b.x - centre.x));
+        const start = beat[0];
+        occupied.add(cellKey(map, start.x, start.y));
+        patrollers.push({ col: start.x, row: start.y, kind: "patroller", hasDrop: false, network: nearestTown(towns, start), beat });
+      }
+    }
+  }
+  return patrollers;
+}
+
+/** The index of the town nearest a cell: a patroller belongs to no network, but every target names one. */
+function nearestTown(towns: readonly Town[], c: Cell): number {
+  let best = 0;
+  towns.forEach((t, i) => {
+    if (Math.hypot(t.x - c.x, t.y - c.y) < Math.hypot(towns[best].x - c.x, towns[best].y - c.y)) best = i;
+  });
+  return best;
 }
 
 /**

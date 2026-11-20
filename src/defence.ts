@@ -61,17 +61,23 @@ export const HILL_STEP = 4;
 export const HILL_SPAN = 100;
 
 /**
- * The attack, all from the seed and the hunter's range: volleys of 3 to 5 missiles from
+ * The attack, all from the seed and the attacker's range: volleys of 3 to 5 missiles from
  * the one launcher, each arriving from its own point across the sky, and a hill
- * silhouette for the horizon. A nearer hunter's missiles arrive sooner.
+ * silhouette for the horizon. A nearer attacker's missiles arrive sooner. A lightly armed
+ * attacker (a patroller) fires fewer volleys.
  */
-export function createDefence(seed: number, cfg: Config, rangeCells: number = cfg.dashboard.hunterEngageRange): DefenceState {
+export function createDefence(
+  seed: number,
+  cfg: Config,
+  rangeCells: number = cfg.dashboard.hunterEngageRange,
+  volleys: number = cfg.defence.volleys
+): DefenceState {
   const d = cfg.defence;
   const rng = createRng(seed);
   const travel = missileTravelFor(rangeCells, cfg);
   const launcher = { yaw: 0, pitch: d.launcherPitchDegrees };
   const missiles: Missile[] = [];
-  for (let v = 0; v < d.volleys; v++) {
+  for (let v = 0; v < volleys; v++) {
     const start = d.warningSeconds + v * d.volleyGapSeconds;
     const count = rangeInt(rng, d.volleyMin, d.volleyMax);
     for (let i = 0; i < count; i++) {
