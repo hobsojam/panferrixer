@@ -3,6 +3,7 @@ import { config } from "../src/config";
 import { startPosition, worldFor, type World } from "../src/dashboard";
 import { generateWorld } from "../src/local-map";
 import { cellKey, OFFSETS, reachableFrom } from "../src/route";
+import { MANY_WORLDS_TIMEOUT_MS } from "./helpers";
 
 /**
  * The game can only be finished if every network can be reached (design-notes 4.7). This checks
@@ -43,7 +44,7 @@ describe("every network can be reached", () => {
     for (let seed = 1; seed <= 50; seed++) {
       expect(unreachableTargets(seed), `world seed ${seed}`).toEqual([]);
     }
-  });
+  }, MANY_WORLDS_TIMEOUT_MS);
 
   it("detects a town walled off by high ground", () => {
     const { world, cfg } = worldWithSeed(config.localMap.worldSeed);

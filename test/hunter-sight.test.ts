@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dashboardOf } from "./helpers";
+import { dashboardOf, MANY_WORLDS_TIMEOUT_MS } from "./helpers";
 import { createAppState, updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
 import {
@@ -53,7 +53,7 @@ describe("the start position", () => {
       const generated = generateWorld({ ...config.localMap, worldSeed: seed });
       check({ ...world, ...generated }, seed);
     }
-  });
+  }, MANY_WORLDS_TIMEOUT_MS);
 
   it("the game does not open with an attack", () => {
     let s: AppState = createAppState(config);
