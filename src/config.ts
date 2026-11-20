@@ -111,6 +111,11 @@ export const config = {
     perCellWalked: 0.02, // walking the width of the map costs about one and a half cells more
     dropCells: 2, // an energy drop restores two cells (design-notes 4.6)
     armourDropPlates: 2, // an armour drop fully mends the two weakest plates, broken ones first (design-notes 4.9)
+    // Recharge (#82, design-notes 4.9): standing still and not threatened mends cracks, never broken plates.
+    rechargeSecondsPerCrack: 1.5, // quick, so the choice is about cost, not patience: a twice-cracked plate mends in three seconds
+    rechargeCellsPerCrack: 0.25, // the cost bites: mending one attack's spread cracks (six) costs a cell and a half
+    // Recharge stops at the low-power line, so resting can never be what flattens the batteries.
+    // The low-power line is dashboard.lowThreshold.
   },
 
   // Missile defence (design-notes 2.9a, 4.8, 4.9). Placeholders, tuned by playtest.

@@ -4,7 +4,7 @@
  * incoming missile can arrive from. A hit cracks the plate facing it; a plate breaks after
  * hitsPerPlate hits. A hit on a slice whose plate is gone spills to the nearest standing
  * plate, so the robot can take as many hits in all as before, and zero standing plates is
- * still death. Spread hits leave cracks, which recharge can mend; focused hits break plates,
+ * still death. Spread hits leave cracks, which recharge can mend (dashboard.ts, recharge); focused hits break plates,
  * which only armour can replace.
  *
  * A plate is its integrity: hitsPerPlate when whole, 0 when broken. Pure functions only.
@@ -69,6 +69,19 @@ export function hitPlate(plates: Plates, facing: number): { plates: number[]; to
   const next = [...plates];
   if (took >= 0) next[took] -= 1;
   return { plates: next, took };
+}
+
+/**
+ * The plate recharge mends next (#82): the most cracked plate still standing, the left one on a
+ * tie. -1 when no standing plate is cracked. A broken plate is never recharged: it needs armour.
+ */
+export function plateToMend(plates: Plates, hitsPerPlate: number): number {
+  let best = -1;
+  for (let i = 0; i < plates.length; i++) {
+    if (plates[i] <= 0 || plates[i] >= hitsPerPlate) continue;
+    if (best === -1 || plates[i] < plates[best]) best = i;
+  }
+  return best;
 }
 
 /** Fully mends the `count` weakest plates: broken ones first, then the most cracked. */

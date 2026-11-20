@@ -1,7 +1,7 @@
-import { cracksOn, standing } from "./armour";
+import { cracksOn, plateToMend, standing } from "./armour";
 import { ART, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
-import { AVAILABLE_VERBS, VERB_GRID, blipStrength, buildingCells, gridDisableReady, isHidden, isInsideBuilding, isLow, isPaused, isSuppressed, positionOf, ringReach, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
+import { AVAILABLE_VERBS, VERB_GRID, blipStrength, buildingCells, gridDisableReady, isHidden, isInsideBuilding, isLow, isPaused, isResting, isSuppressed, positionOf, ringReach, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
 import { drawCracks, tracePlate } from "./plates";
 import { drawGlow } from "./render";
@@ -37,8 +37,10 @@ export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardS
   drawVerbGrid(ctx, state, cfg);
   drawSidePanel(ctx, state, world, cfg);
   drawGauge(ctx, "ENERGY", energyUnits(state.energyCells, cfg.dashboard.energyCells, cfg), 330, cfg, "cell", state.time);
-  drawGauge(ctx, "SHIELDS", plateUnits(state.plates, cfg), 384, cfg, "plate", state.time);
+  const rest = isResting(state, world);
+  drawGauge(ctx, "SHIELDS", plateUnits(state.plates, rest ? state.mendProgress : null, cfg), 384, cfg, "plate", state.time);
   if (isLow(state.energyCells, cfg)) drawLowPower(ctx, state.time, cfg);
+  else if (rest) drawText(ctx, "RECHARGING", cfg.canvas.width / 2, 316, 15, cfg.colors.shield, 1, "monospace");
 
   drawText(ctx, hintFor(state, soundOn), w / 2, h - 28, 14, c.text, 0.8, "monospace");
 
@@ -76,7 +78,9 @@ function drawTracePanel(ctx: CanvasRenderingContext2D, state: DashboardState, cf
   drawText(ctx, "STATE", x + 10, PANEL_TOP + 14, 12, c.text, 0.7, "monospace", "left");
 
   const low = isLow(state.energyCells, cfg) || isLow(standing(state.plates), cfg);
-  const agitation = low ? 1.8 : 1;
+  // Resting calms the trace (#82); low power or armour agitates it.
+  const calm = !low && isResting(state, worldFor(cfg));
+  const agitation = low ? 1.8 : calm ? 0.5 : 1;
   const points = cfg.dashboard.tracePoints;
   const midY = PANEL_TOP + height * 0.6;
   const amplitude = height * 0.22;
@@ -93,7 +97,7 @@ function drawTracePanel(ctx: CanvasRenderingContext2D, state: DashboardState, cf
     ctx.beginPath();
     for (let i = 0; i < points; i++) {
       const px = x + 8 + (i / (points - 1)) * (width - 16);
-      const wobble = Math.sin(i * 0.23 + t * 2.3) * 0.6 + Math.sin(i * 0.91 - t * (low ? 6 : 1.1)) * 0.4;
+      const wobble = Math.sin(i * 0.23 + t * 2.3) * 0.6 + Math.sin(i * 0.91 - t * (low ? 6 : calm ? 0.5 : 1.1)) * 0.4;
       const py = midY - wobble * agitation * amplitude;
       if (i === 0) ctx.moveTo(px, py);
       else ctx.lineTo(px, py);
@@ -563,11 +567,15 @@ function drawLowPower(ctx: CanvasRenderingContext2D, time: number, cfg: Config):
   drawText(ctx, "LOW POWER", cfg.canvas.width / 2, 316, 15, cfg.colors.alert, 1, "monospace");
 }
 
-/** One unit of a gauge: how full it is (0..1), cracks to draw on it, and whether it flashes. */
+/**
+ * One unit of a gauge: how full it is (0..1), cracks to draw on it, and whether it flashes.
+ * `healing` is how far recharge is through mending its last crack, which fades as it mends.
+ */
 interface GaugeUnit {
   part: number;
   cracks: number;
   flash: boolean;
+  healing?: number;
 }
 
 /**
@@ -582,11 +590,14 @@ function energyUnits(count: number, max: number, cfg: Config): GaugeUnit[] {
 
 /**
  * Armour as trapezoid plates across the front arc, left to right (armour.ts): each standing
- * plate shows its own cracks. When few stand, every standing plate flashes.
+ * plate shows its own cracks. When few stand, every standing plate flashes. While resting,
+ * `mending` is the recharge's progress on the plate it is mending.
  */
-function plateUnits(plates: readonly number[], cfg: Config): GaugeUnit[] {
+function plateUnits(plates: readonly number[], mending: number | null, cfg: Config): GaugeUnit[] {
   const low = isLow(standing(plates), cfg);
-  return plates.map((p) => ({ part: p > 0 ? 1 : 0, cracks: cracksOn(p, cfg.dashboard.hitsPerPlate), flash: low && p > 0 }));
+  const hpp = cfg.dashboard.hitsPerPlate;
+  const mended = mending === null ? -1 : plateToMend(plates, hpp);
+  return plates.map((p, i) => ({ part: p > 0 ? 1 : 0, cracks: cracksOn(p, hpp), flash: low && p > 0, healing: i === mended ? (mending ?? 0) : undefined }));
 }
 
 /** A row of gauge units with its label. */
@@ -613,7 +624,14 @@ function drawGauge(ctx: CanvasRenderingContext2D, label: string, units: readonly
     if (filled && u.part < 1 && shape === "cell") ctx.fillRect(x, y, unitW * u.part, height);
     else if (filled) ctx.fill();
     ctx.stroke();
-    if (u.cracks > 0) drawCracks(ctx, x, y, unitW, height, u.cracks, c.background);
+    if (u.healing !== undefined && u.cracks > 0) {
+      // The crack being mended fades out as the recharge closes it.
+      drawCracks(ctx, x, y, unitW, height, u.cracks - 1, c.background);
+      ctx.globalAlpha = 1 - u.healing;
+      drawCracks(ctx, x, y, unitW, height, u.cracks, c.background);
+    } else if (u.cracks > 0) {
+      drawCracks(ctx, x, y, unitW, height, u.cracks, c.background);
+    }
   });
   ctx.globalAlpha = 1;
 }

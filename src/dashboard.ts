@@ -1,7 +1,7 @@
 import type { Config } from "./config";
 import { generateWorld, inTown, isEnemyKind, townCentres, type LocalMap, type Target, type Town } from "./local-map";
 import { createRng } from "./rng";
-import { allWhole, fullPlates, mendWeakest } from "./armour";
+import { allWhole, fullPlates, mendWeakest, plateToMend } from "./armour";
 import { canWalk, stepToward } from "./enemy-move";
 import { cellKey, findRoute, findRouteToAny, isPassable, OFFSETS, walkPoint, type Blocked } from "./route";
 
@@ -76,6 +76,9 @@ export interface World {
   energyPerCellWalked: number; // extra cells drained per map cell walked
   energyDropCells: number; // cells restored by an energy drop
   armourDropPlates: number; // plates restored by an armour drop
+  rechargeSecondsPerCrack: number; // resting time to mend one crack
+  rechargeCellsPerCrack: number; // energy one mended crack costs, drawn as it mends
+  rechargeFloorCells: number; // recharge stops at this much energy: the low-power line
 }
 
 export interface DashboardState {
@@ -85,6 +88,7 @@ export interface DashboardState {
   // The armour plates across the robot's front arc, left to right: each one's integrity, from
   // hitsPerPlate (whole) down to 0 (broken). See armour.ts.
   plates: number[];
+  mendProgress: number; // 0..1: how far recharge is through mending the next crack
   time: number; // seconds on the dashboard; drives the state-of-mind trace
   location: number; // index of the town the robot is in; the last one it was in when between towns
   mode: "browse" | "targeting" | "moving";
@@ -188,6 +192,9 @@ export function worldFor(cfg: Config): World {
       energyPerCellWalked: cfg.energy.perCellWalked,
       energyDropCells: cfg.energy.dropCells,
       armourDropPlates: cfg.energy.armourDropPlates,
+      rechargeSecondsPerCrack: cfg.energy.rechargeSecondsPerCrack,
+      rechargeCellsPerCrack: cfg.energy.rechargeCellsPerCrack,
+      rechargeFloorCells: cfg.dashboard.lowThreshold,
     };
   }
   return cachedWorld;
@@ -200,6 +207,7 @@ export function createDashboardState(cfg: Config): DashboardState {
     col: 0,
     energyCells: cfg.dashboard.energyCells,
     plates: fullPlates(cfg.dashboard.shieldPlates, cfg.dashboard.hitsPerPlate),
+    mendProgress: 0,
     time: 0,
     location: cfg.dashboard.startNode,
     mode: "browse",
@@ -674,7 +682,8 @@ export function stepDashboard(state: DashboardState, actions: readonly Action[],
   let s: DashboardState = state;
   if (!isPaused(state)) {
     const walked = walkStep({ ...state, time: state.time + dt }, dt, world.walkSpeed);
-    s = drainEnergy(walked, dt, distanceTo(state.pos, walked.pos.x, walked.pos.y), world);
+    const moved = distanceTo(state.pos, walked.pos.x, walked.pos.y);
+    s = recharge(drainEnergy(walked, dt, moved, world), dt, moved, world);
   }
   s = { ...s, location: townIndexAt(s.pos, world, s.location) };
   s = collectDrops(s, world);
@@ -773,6 +782,49 @@ export function drainEnergy(s: DashboardState, seconds: number, walkedCells: num
   const drain = seconds * world.energyDrainPerSecond + walkedCells * world.energyPerCellWalked;
   if (drain <= 0) return s;
   return { ...s, energyCells: Math.max(0, s.energyCells - drain) };
+}
+
+/**
+ * Threatened (#82, design-notes 4.9): an attack has just ended and its breather is running, or
+ * an alerted enemy is within scan range. The robot cannot rest while threatened. The same state
+ * will gate saving (design-notes 3, item 19).
+ */
+export function isThreatened(s: DashboardState, world: World): boolean {
+  if (s.time < s.breatherUntil) return true;
+  return s.alerted.some((index) => {
+    if (s.ruins.includes(index) || isHidden(s, index, world)) return false;
+    const p = positionOf(s, index, world);
+    return distanceTo(s.pos, p.x, p.y) <= world.scanRadius;
+  });
+}
+
+/**
+ * Resting (design-notes 4.9): standing still, time running, not threatened, with a cracked
+ * plate to mend and energy above the low-power line. No new icon: stopping is resting.
+ */
+export function isResting(s: DashboardState, world: World): boolean {
+  return (
+    !isPaused(s) &&
+    s.route.length === 0 &&
+    plateToMend(s.plates, world.hitsPerPlate) >= 0 &&
+    s.energyCells > world.rechargeFloorCells &&
+    !isThreatened(s, world)
+  );
+}
+
+/**
+ * Recharge (#82): while resting, cracks mend one at a time, most cracked plate first, and energy
+ * drains as they do. Moving or a threat interrupts it, and the crack in progress starts over.
+ */
+function recharge(s: DashboardState, dt: number, moved: number, world: World): DashboardState {
+  if (moved > 0 || !isResting(s, world)) return s.mendProgress === 0 ? s : { ...s, mendProgress: 0 };
+  const step = dt / world.rechargeSecondsPerCrack;
+  const energyCells = Math.max(0, s.energyCells - step * world.rechargeCellsPerCrack);
+  const progress = s.mendProgress + step;
+  if (progress < 1) return { ...s, energyCells, mendProgress: progress };
+  const plates = [...s.plates];
+  plates[plateToMend(plates, world.hitsPerPlate)] += 1;
+  return { ...s, energyCells, plates, mendProgress: 0 };
 }
 
 /** True once the batteries are flat. */

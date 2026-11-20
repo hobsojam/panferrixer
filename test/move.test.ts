@@ -41,6 +41,9 @@ const flatWorld: World = {
   energyPerCellWalked: config.energy.perCellWalked,
   energyDropCells: config.energy.dropCells,
   armourDropPlates: config.energy.armourDropPlates,
+  rechargeSecondsPerCrack: config.energy.rechargeSecondsPerCrack,
+  rechargeCellsPerCrack: config.energy.rechargeCellsPerCrack,
+  rechargeFloorCells: config.dashboard.lowThreshold,
 };
 
 function step(state: DashboardState, actions: Action[], dt = DT, w: World = flatWorld): DashboardState {
