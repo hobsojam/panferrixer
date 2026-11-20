@@ -1,6 +1,7 @@
 import type { Config } from "./config";
 import {
   createDashboardState,
+  disturbPatrollers,
   drainEnergy,
   hunterInRange,
   isOutOfEnergy,
@@ -146,7 +147,9 @@ function updateLive(state: LiveState, input: AppInput, dt: number, cfg: Config, 
     // breather after the player's own flight: fights alternate turns.
     const hunter = hunterInRange(dashboard, world, cfg.dashboard.hunterEngageRange);
     if (hunter !== null) {
-      const defence = createDefence(newSeed(), cfg, rangeTo(dashboard, hunter, world));
+      // A patroller is lightly armed: one volley, against a hunter's three (#66).
+      const volleys = world.targets[hunter].kind === "patroller" ? cfg.dashboard.patrollerVolleys : cfg.defence.volleys;
+      const defence = createDefence(newSeed(), cfg, rangeTo(dashboard, hunter, world), volleys);
       return { screen: "defence", dashboard, defence, attacker: hunter };
     }
     return { screen: "dashboard", dashboard };
@@ -187,15 +190,20 @@ function updateLive(state: LiveState, input: AppInput, dt: number, cfg: Config, 
   const timed: DashboardState = moveHunters(drainEnergy({ ...state.dashboard, time: state.dashboard.time + dt }, dt, 0, world), world, dt);
   const flight = updateFlight(state.flight, input.steering, dt, cfg);
 
+  // A missile hit is a disturbance: patrollers within earshot come to look (#66).
+  const struck = flight.phase === "hit" && state.flight.phase !== "hit";
+  const heard = struck
+    ? disturbPatrollers(timed, positionOf(timed, state.targetIndex, world), world.patrollerHearingCells, world)
+    : timed;
   // A hit on a power station takes its network's shields down. The station itself survives.
-  if (flight.phase === "hit" && state.flight.phase !== "hit" && state.target.kind === "power") {
-    return { ...state, dashboard: openWindow(timed, networkOf(state.target), world), flight };
+  if (struck && state.target.kind === "power") {
+    return { ...state, dashboard: openWindow(heard, networkOf(state.target), world), flight };
   }
   // A hit on a dome wakes its defender, if it has one, whether the missile destroys the dome
   // or the shield deflects it (design-notes 4.4). It comes out while the result shows, but
   // holds its first attack until the player is back at the dashboard.
-  if (flight.phase === "hit" && state.flight.phase !== "hit" && state.target.kind === "dome") {
-    return { ...state, dashboard: wakeDefender(timed, state.targetIndex, world), flight };
+  if (struck && state.target.kind === "dome") {
+    return { ...state, dashboard: wakeDefender(heard, state.targetIndex, world), flight };
   }
-  return { ...state, dashboard: timed, flight };
+  return { ...state, dashboard: heard, flight };
 }

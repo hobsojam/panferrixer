@@ -1,8 +1,8 @@
 import type { Config } from "./config";
-import { generateWorld, inTown, isEnemyKind, townCentres, type LocalMap, type Target, type Town } from "./local-map";
+import { generateWorld, inTown, isArmedHelper, isEnemyKind, townCentres, type LocalMap, type Target, type Town } from "./local-map";
 import { createRng } from "./rng";
 import { allWhole, fullPlates, mendWeakest, plateToMend } from "./armour";
-import { canWalk, stepToward } from "./enemy-move";
+import { canWalk, reachableGoal, stepToward } from "./enemy-move";
 import { cellKey, findRoute, findRouteToAny, isPassable, OFFSETS, walkPoint, type Blocked } from "./route";
 
 /** The four verbs from design-notes 4.6. All four work. */
@@ -67,6 +67,14 @@ export interface World {
   hunterHoldCells: number; // an alerted hunter closes to this range, then holds
   defenderSpeed: number; // cells per second
   defenderGuardCells: number; // an awake defender guards this far round its post (design-notes 4.10)
+  patrollerSpeed: number; // cells per second on its beat, investigating or fighting
+  patrollerRunSpeed: number; // cells per second while running for help
+  patrollerSightCells: number;
+  patrollerHearingCells: number; // a missile hit or power cut this close draws it in
+  patrollerSearchSeconds: number; // how long it looks round a disturbance
+  patrollerHelpReachCells: number; // this close to the enemy it fetches, help is raised
+  patrollerLeashCells: number; // once fighting, how far it follows from where it started
+  patrollerMagazineAttacks: number;
   viewCols: number; // the mini map's local window, in cells: also the reach of the robot's equipment
   viewRows: number;
   // The energy and shield economy (#15). Energy is a slow clock: it drains with time and walking.
@@ -127,6 +135,34 @@ export interface DashboardState {
   awake: number[];
   // Defenders woken during a flight whose first-attack wait starts when the player is back at the dashboard.
   heldAttacks: number[];
+  // What each patroller is doing (#66). Missing means it is on its beat, heading for its second waypoint.
+  patrollers: Record<number, PatrollerMind>;
+  // Every call for help a patroller has raised, oldest first: observable by game logic and tests.
+  helpCalls: HelpCall[];
+}
+
+/**
+ * A patroller's state of mind (#66, design-notes 4.10). On its **beat** it walks its loop.
+ * **Investigating**, it goes to look at a disturbance, searches a while, then returns to its beat.
+ * **Fetching**, it has seen the robot and runs to the nearest armed enemy for help. Once help is
+ * raised (or there is none to fetch) it fights: it joins the alerted enemies, with `anchor` as
+ * the point its leash is measured from, and goes back to its beat when the fight ends.
+ */
+export interface PatrollerMind {
+  mode: "beat" | "investigate" | "fetch";
+  leg: number; // index into its beat of the waypoint it is walking to
+  look: Point | null; // where it is going to investigate
+  lookUntil: number | null; // when it gives up searching; set on arrival
+  helper: number | null; // the enemy it is fetching
+  seen: Point | null; // where it saw the robot: help must be able to fight there
+  anchor: Point | null; // where it started fighting
+}
+
+/** A patroller reached an armed enemy and alerted it to the robot. */
+export interface HelpCall {
+  patroller: number;
+  helper: number;
+  time: number;
 }
 
 /** A hunter sent to rearm: it walks there, stays a while, then goes home. */
@@ -184,6 +220,14 @@ export function worldFor(cfg: Config): World {
       hunterHoldCells: cfg.dashboard.hunterHoldCells,
       defenderSpeed: cfg.dashboard.defenderSpeed,
       defenderGuardCells: cfg.dashboard.defenderGuardCells,
+      patrollerSpeed: cfg.dashboard.patrollerSpeed,
+      patrollerRunSpeed: cfg.dashboard.patrollerRunSpeed,
+      patrollerSightCells: cfg.dashboard.patrollerSightCells,
+      patrollerHearingCells: cfg.dashboard.patrollerHearingCells,
+      patrollerSearchSeconds: cfg.dashboard.patrollerSearchSeconds,
+      patrollerHelpReachCells: cfg.dashboard.patrollerHelpReachCells,
+      patrollerLeashCells: cfg.dashboard.patrollerLeashCells,
+      patrollerMagazineAttacks: cfg.dashboard.patrollerMagazineAttacks,
       viewCols: cfg.localMap.viewCols,
       viewRows: cfg.localMap.viewRows,
       energyMax: cfg.dashboard.energyCells,
@@ -233,34 +277,56 @@ export function createDashboardState(cfg: Config): DashboardState {
     breatherUntil: 0,
     awake: [],
     heldAttacks: [],
+    patrollers: {},
+    helpCalls: [],
   };
 }
 
 /**
- * Where the robot starts (design-notes 4.7): on open ground outside every town and out of
- * sight of every hunter, as near the starting network as that allows, so the player
- * decides when and how to walk in. Searched outward from the starting town by walking
+ * Where the robot starts (design-notes 4.7): on open ground outside every town, out of
+ * sight of every hunter and of every cell a patroller walks on its beat (#66), as near the
+ * starting network as that allows, so the player decides when and how to walk in. Searched outward from the starting town by walking
  * distance, so the start is always reachable. Falls back to the town centre.
  */
 export function startPosition(world: World, cfg: Config): Point {
+  const cached = startCache.get(world);
+  if (cached) return { ...cached };
   const home = townCentres(cfg.localMap)[cfg.dashboard.startNode];
   const clearance = cfg.dashboard.startClearanceCells;
   const blocked = new Set<number>();
-  const posts: Point[] = [];
+  const hunters: Point[] = [];
+  const beats: Point[] = [];
   for (const t of world.targets) {
-    // A defender is asleep in its dome at the start, so only the hunters are looking.
-    if (t.kind === "hunter") posts.push({ x: t.col, y: t.row });
+    // A defender is asleep in its dome at the start, so only the hunters and patrollers are looking.
+    if (t.kind === "hunter") hunters.push({ x: t.col, y: t.row });
+    else if (t.kind === "patroller") beats.push(...beatCells(t.beat ?? [], world));
     else if (isBuilding(t)) blocked.add(cellKey(world.map, t.col, t.row));
   }
   const outsideTowns = (x: number, y: number) =>
     !world.towns.some((t) => inTown(t, world.townRadiusCols + clearance, world.townRadiusRows + clearance, x, y));
-  const unseen = (x: number, y: number) => posts.every((p) => Math.hypot(p.x - x, p.y - y) > world.hunterSightCells + clearance);
+  const clearOf = (cells: Point[], sight: number) => (x: number, y: number) =>
+    cells.every((p) => Math.hypot(p.x - x, p.y - y) > sight + clearance);
+  const unseenByHunters = clearOf(hunters, world.hunterSightCells);
+  const offEveryBeat = clearOf(beats, world.patrollerSightCells);
+  // Best: out of every hunter's sight and off every beat. On a map whose beats leave no such
+  // cell near the start, hunters alone: a patroller may then come by, as it would later anyway.
+  const start =
+    nearestCell(world, home, blocked, (x, y) => outsideTowns(x, y) && unseenByHunters(x, y) && offEveryBeat(x, y)) ??
+    nearestCell(world, home, blocked, (x, y) => outsideTowns(x, y) && unseenByHunters(x, y)) ?? { x: home.x, y: home.y };
+  startCache.set(world, start);
+  return { ...start };
+}
 
-  const seen = new Set<number>([cellKey(world.map, home.x, home.y)]);
-  const queue: Point[] = [{ x: home.x, y: home.y }];
+/** The start depends only on the world, and finding it walks every beat, so it is worked out once per world. */
+const startCache = new WeakMap<World, Point>();
+
+/** The cell nearest `from` by walking distance that passes `accept`, or null. */
+function nearestCell(world: World, from: Point, blocked: Blocked, accept: (x: number, y: number) => boolean): Point | null {
+  const seen = new Set<number>([cellKey(world.map, from.x, from.y)]);
+  const queue: Point[] = [{ x: from.x, y: from.y }];
   for (let head = 0; head < queue.length; head++) {
     const c = queue[head];
-    if (outsideTowns(c.x, c.y) && unseen(c.x, c.y)) return c;
+    if (accept(c.x, c.y)) return c;
     for (const [dx, dy] of OFFSETS) {
       const nx = c.x + dx;
       const ny = c.y + dy;
@@ -270,7 +336,17 @@ export function startPosition(world: World, cfg: Config): Point {
       queue.push({ x: nx, y: ny });
     }
   }
-  return { x: home.x, y: home.y };
+  return null;
+}
+
+/** Every cell a patroller walks on its beat: the terrain route between each waypoint and the next. */
+function beatCells(beat: readonly Point[], world: World): Point[] {
+  const cells: Point[] = [...beat];
+  beat.forEach((from, i) => {
+    const to = beat[(i + 1) % beat.length];
+    cells.push(...(findRoute(from, to, world.map) ?? []));
+  });
+  return cells;
 }
 
 /**
@@ -431,13 +507,19 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
   let next = s;
   world.targets.forEach((t, index) => {
     if (!isEnemyKind(t.kind) || next.ruins.includes(index) || isHidden(next, index, world)) return;
+    const patroller = t.kind === "patroller";
+    if (patroller && !next.alerted.includes(index) && !next.rearming[index]) {
+      next = stepPatroller(next, index, world, dt);
+      return;
+    }
     const defender = t.kind === "defender";
-    const post = { x: t.col, y: t.row };
+    // A fighting patroller's leash runs from where it started fighting; it has no post to go home to.
+    const post = patroller ? (next.patrollers[index]?.anchor ?? { x: t.col, y: t.row }) : { x: t.col, y: t.row };
     const here = positionOf(next, index, world);
     // A hunter's leash is how far it has come from its post; a defender's guard area is where the robot is.
     const inReach = defender
       ? distanceTo(next.pos, post.x, post.y) <= world.defenderGuardCells
-      : Math.hypot(here.x - post.x, here.y - post.y) <= world.hunterLeashCells;
+      : Math.hypot(here.x - post.x, here.y - post.y) <= (patroller ? world.patrollerLeashCells : world.hunterLeashCells);
     if (inReach && distanceTo(next.pos, here.x, here.y) <= world.hunterSightCells) next = alertTo(next, [index], world); // a rearming enemy is skipped
     if (next.alerted.includes(index) && !inReach) {
       next = { ...next, alerted: next.alerted.filter((i) => i !== index) };
@@ -490,7 +572,8 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
     // post is never one, and a patrol stop or rearm point is a free cell beside a building that
     // the hunter can walk to. A goal across high ground is approached as near as the hunter
     // can get, and tried again on the next step.
-    const pos = stepToward(here, goal, world.map, (defender ? world.defenderSpeed : world.hunterSpeed) * dt);
+    const speed = defender ? world.defenderSpeed : patroller ? world.patrollerSpeed : world.hunterSpeed;
+    const pos = stepToward(here, goal, world.map, speed * dt);
     next = { ...next, hunterPos: { ...next.hunterPos, [index]: pos } };
   });
   return next;
@@ -558,6 +641,157 @@ function nextStop(s: DashboardState, index: number, patrol: Patrol, world: World
   return { ...patrol, stop: candidates[0].i, at: candidates[0].at, checked };
 }
 
+/** A patroller's state of mind; one never seen to change is on its beat, heading for its second waypoint. */
+export function mindOf(s: DashboardState, index: number, world: World): PatrollerMind {
+  const beat = world.targets[index].beat ?? [];
+  return s.patrollers[index] ?? { mode: "beat", leg: beat.length > 1 ? 1 : 0, look: null, lookUntil: null, helper: null, seen: null, anchor: null };
+}
+
+function withMind(s: DashboardState, index: number, mind: PatrollerMind): DashboardState {
+  return { ...s, patrollers: { ...s.patrollers, [index]: mind } };
+}
+
+/**
+ * The armed enemy a patroller runs to for help (#66): the nearest hunter or defender that is
+ * not destroyed, not already alerted (it is coming anyway), not off rearming (it has nothing
+ * to fight with), and that would fight where the robot was seen: inside a defender's guard
+ * area, or within a hunter's leash of its post. Help that would turn straight back is no help.
+ * A defender asleep in its dome counts: the patroller goes to its door and wakes it. Null when
+ * there is nobody to fetch. Ties go to the lower index.
+ */
+export function nearestHelper(s: DashboardState, index: number, world: World, seen: Point = s.pos): number | null {
+  const here = positionOf(s, index, world);
+  let best: number | null = null;
+  let bestDistance = Infinity;
+  world.targets.forEach((t, i) => {
+    if (!isArmedHelper(t.kind) || s.ruins.includes(i) || s.alerted.includes(i) || s.rearming[i]) return;
+    const reach = t.kind === "defender" ? world.defenderGuardCells : world.hunterLeashCells;
+    if (Math.hypot(seen.x - t.col, seen.y - t.row) > reach) return;
+    const p = positionOf(s, i, world);
+    const d = Math.hypot(p.x - here.x, p.y - here.y);
+    if (d < bestDistance) {
+      best = i;
+      bestDistance = d;
+    }
+  });
+  return best;
+}
+
+/** The patroller starts fighting where it stands: it joins the alerted enemies, leashed to this spot. */
+function startFighting(s: DashboardState, index: number, world: World): DashboardState {
+  const here = positionOf(s, index, world);
+  const mind = { ...mindOf(s, index, world), mode: "beat" as const, helper: null, look: null, lookUntil: null, anchor: { ...here } };
+  return alertTo(withMind(s, index, mind), [index], world);
+}
+
+/**
+ * Help arrives (#66): the patroller has reached the armed enemy it was fetching. That enemy is
+ * alerted to the robot, and a defender asleep in its dome is woken out of it first. The call is
+ * recorded, and the patroller turns to fight alongside it.
+ */
+function raiseHelp(s: DashboardState, index: number, helper: number, world: World): DashboardState {
+  const woken = isHidden(s, helper, world) ? { ...s, awake: [...s.awake, helper] } : s;
+  const helped = alertTo(woken, [helper], world);
+  const called = { ...helped, helpCalls: [...helped.helpCalls, { patroller: index, helper, time: s.time }] };
+  return startFighting(called, index, world);
+}
+
+/**
+ * One step of a patroller that is not fighting (#66, design-notes 4.10). It is always looking:
+ * seeing the robot sends it running for help, or, with nobody left to fetch, straight into the
+ * fight. Otherwise it fetches, investigates or walks its beat, as its mind says.
+ */
+function stepPatroller(s: DashboardState, index: number, world: World, dt: number): DashboardState {
+  const beat = world.targets[index].beat ?? [];
+  const here = positionOf(s, index, world);
+  let mind = mindOf(s, index, world);
+  if (mind.mode !== "fetch" && distanceTo(s.pos, here.x, here.y) <= world.patrollerSightCells) {
+    mind = { ...mind, mode: "fetch", helper: null, look: null, lookUntil: null, seen: { ...s.pos } };
+  }
+
+  if (mind.mode === "fetch") {
+    // The helper it chose may have been destroyed, alerted or sent to rearm since: choose again.
+    let helper = mind.helper;
+    if (helper === null || s.ruins.includes(helper) || s.alerted.includes(helper) || s.rearming[helper]) {
+      helper = nearestHelper(s, index, world, mind.seen ?? s.pos);
+    }
+    if (helper === null) return startFighting(withMind(s, index, mind), index, world);
+    const at = positionOf(s, helper, world);
+    if (Math.hypot(at.x - here.x, at.y - here.y) <= world.patrollerHelpReachCells) {
+      return raiseHelp(withMind(s, index, { ...mind, helper }), index, helper, world);
+    }
+    const goal = { x: Math.round(at.x), y: Math.round(at.y) };
+    return movePatroller(withMind(s, index, { ...mind, helper }), index, goal, world.patrollerRunSpeed * dt, world);
+  }
+
+  if (mind.mode === "investigate" && mind.look) {
+    if (here.x === mind.look.x && here.y === mind.look.y) {
+      // There: look round for a while, then go back to the nearest point of its beat.
+      if (mind.lookUntil === null) return withMind(s, index, { ...mind, lookUntil: s.time + world.patrollerSearchSeconds });
+      if (s.time < mind.lookUntil) return s;
+      return withMind(s, index, { ...mind, mode: "beat", look: null, lookUntil: null, leg: nearestLeg(beat, here) });
+    }
+    return movePatroller(withMind(s, index, mind), index, mind.look, world.patrollerSpeed * dt, world);
+  }
+
+  if (beat.length === 0) return s;
+  let leg = mind.leg % beat.length;
+  if (here.x === beat[leg].x && here.y === beat[leg].y) leg = (leg + 1) % beat.length;
+  if (leg !== mind.leg || mind.mode !== "beat") mind = { ...mind, mode: "beat", leg, look: null, lookUntil: null };
+  return movePatroller(withMind(s, index, mind), index, beat[leg], world.patrollerSpeed * dt, world);
+}
+
+function movePatroller(s: DashboardState, index: number, goal: Point, distance: number, world: World): DashboardState {
+  const pos = stepToward(positionOf(s, index, world), goal, world.map, distance);
+  return { ...s, hunterPos: { ...s.hunterPos, [index]: pos } };
+}
+
+/** The waypoint of a beat nearest a point. */
+function nearestLeg(beat: readonly Point[], p: Point): number {
+  let best = 0;
+  beat.forEach((c, i) => {
+    if (Math.hypot(c.x - p.x, c.y - p.y) < Math.hypot(beat[best].x - p.x, beat[best].y - p.y)) best = i;
+  });
+  return best;
+}
+
+/**
+ * Where a patroller goes to look at a disturbance: the spot itself if it is open ground, or the
+ * free cell beside an intact building nearest the patroller (enemies never stop on a building),
+ * or, across high ground, the nearest cell it can reach. Null if it can reach nowhere.
+ */
+function lookPoint(s: DashboardState, here: Point, spot: Point, world: World): Point | null {
+  const cell = { x: Math.round(spot.x), y: Math.round(spot.y) };
+  const blocked = buildingCells(s, world);
+  if (blocked.has(cellKey(world.map, cell.x, cell.y))) {
+    const beside = OFFSETS.map(([dx, dy]) => ({ x: cell.x + dx, y: cell.y + dy }))
+      .filter((c) => isPassable(world.map, c.x, c.y, blocked) && canWalk(here, c, world.map))
+      .sort((a, b) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(b.x - here.x, b.y - here.y));
+    if (beside.length > 0) return beside[0];
+  }
+  return reachableGoal(here, cell, world.map);
+}
+
+/**
+ * Something happened at `spot` (#66): a scan pulse, a missile hit, a power cut. Every patroller
+ * on its beat or already investigating within `radius` goes to look, dropping whatever it was
+ * looking at before. A patroller running for help or fighting carries on: it already knows.
+ */
+export function disturbPatrollers(s: DashboardState, spot: Point, radius: number, world: World): DashboardState {
+  let next = s;
+  world.targets.forEach((t, index) => {
+    if (t.kind !== "patroller" || next.ruins.includes(index) || next.alerted.includes(index) || next.rearming[index]) return;
+    const mind = mindOf(next, index, world);
+    if (mind.mode === "fetch") return;
+    const here = positionOf(next, index, world);
+    if (Math.hypot(spot.x - here.x, spot.y - here.y) > radius) return;
+    const look = lookPoint(next, here, spot, world);
+    if (look === null) return;
+    next = withMind(next, index, { ...mind, mode: "investigate", look, lookUntil: null });
+  });
+  return next;
+}
+
 /**
  * A hunter has made an attack (design-notes 4.10). It spends one from its magazine; once the
  * magazine is empty it breaks off and withdraws to rearm at a free cell beside the nearest
@@ -566,7 +800,8 @@ function nextStop(s: DashboardState, index: number, patrol: Patrol, world: World
 export function spendAttack(s: DashboardState, index: number, world: World): DashboardState {
   const used = (s.attacksUsed[index] ?? 0) + 1;
   const spent = { ...s, attacksUsed: { ...s.attacksUsed, [index]: used } };
-  if (used < world.hunterMagazineAttacks) return spent;
+  const magazine = world.targets[index]?.kind === "patroller" ? world.patrollerMagazineAttacks : world.hunterMagazineAttacks;
+  if (used < magazine) return spent;
   return { ...spent, alerted: spent.alerted.filter((i) => i !== index), rearming: { ...spent.rearming, [index]: { ...rearmPoint(spent, index, world), until: null } } };
 }
 
@@ -701,7 +936,13 @@ export function stepDashboard(state: DashboardState, actions: readonly Action[],
         // Cutting power at a station takes down its network's shields, then starts the cooldown.
         // The network notices: its hunter makes rounds of the domes while the power is down.
         const station = world.targets[s.target];
-        const opened = patrolOutage(openWindow(s, networkOf(station), world), networkOf(station), world);
+        // Patrollers within earshot of the station come to look as well (#66).
+        const opened = disturbPatrollers(
+          patrolOutage(openWindow(s, networkOf(station), world), networkOf(station), world),
+          { x: station.col, y: station.row },
+          world.patrollerHearingCells,
+          world
+        );
         s = { ...opened, mode: "browse", target: null, gridReadyAt: s.time + world.gridDisableCooldownSeconds };
       } else if (s.target !== null) {
         fire = world.targets[s.target];
@@ -756,7 +997,9 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
       return { ...s, mode: "moving", cross };
     }
     if (verb === "scan") {
-      return { ...alertTo(s, alertHunters(s, world), world), zoom: "local", scan: scanFrom(s, world), pulseStarted: s.time };
+      // A patroller the ring reaches comes to look where the pulse came from (#66).
+      const heard = disturbPatrollers(alertTo(s, alertHunters(s, world), world), s.pos, world.scanRadius, world);
+      return { ...heard, zoom: "local", scan: scanFrom(s, world), pulseStarted: s.time };
     }
     if (verb === "gridDisable" && gridDisableReady(s)) {
       // Choose a power station with the cross, the same way as a missile target.

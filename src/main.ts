@@ -32,7 +32,8 @@ canvas.addEventListener("click", () => {
 
 /** The name shown over an attack: the attacking enemy's kind. */
 function attackerName(index: number): string {
-  return worldFor(config).targets[index]?.kind === "defender" ? "DEFENDER" : "HUNTER";
+  const kind = worldFor(config).targets[index]?.kind;
+  return kind === "defender" ? "DEFENDER" : kind === "patroller" ? "PATROLLER" : "HUNTER";
 }
 
 const fixedDt = config.simulation.fixedDtSeconds;

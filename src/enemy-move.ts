@@ -26,6 +26,38 @@ export function reachableGoal(from: Cell, goal: Cell, map: LocalMap): Cell | nul
   return best;
 }
 
+interface Plan {
+  end: Cell;
+  route: Cell[];
+}
+
+/** Planned routes per map, keyed by start cell and goal cell. Cleared when it grows past this. */
+const PLAN_CACHE_LIMIT = 20000;
+const plans = new WeakMap<LocalMap, Map<string, Plan | null>>();
+
+/**
+ * Where an enemy in this cell ends up heading for this goal, and the cells it walks through.
+ * Enemies route over the terrain alone, which never changes, and an enemy stays in one cell
+ * for many steps, so the search is done once per start cell and goal and then remembered.
+ * Without this, every moving enemy searched the whole map twice on every step.
+ */
+function plannedRoute(here: Cell, goal: Cell, map: LocalMap): Plan | null {
+  let cache = plans.get(map);
+  if (!cache) {
+    cache = new Map();
+    plans.set(map, cache);
+  }
+  const start = { x: Math.round(here.x), y: Math.round(here.y) };
+  const key = `${cellKey(map, start.x, start.y)}>${cellKey(map, goal.x, goal.y)}`;
+  const known = cache.get(key);
+  if (known !== undefined) return known;
+  const end = reachableGoal(start, goal, map);
+  const plan = end === null ? null : { end, route: findRoute(start, end, map) ?? [] };
+  if (cache.size >= PLAN_CACHE_LIMIT) cache.clear();
+  cache.set(key, plan);
+  return plan;
+}
+
 /** True if a ground enemy at `from` can walk to `to` without crossing high ground. */
 export function canWalk(from: Cell, to: Cell, map: LocalMap): boolean {
   const start = { x: Math.round(from.x), y: Math.round(from.y) };
@@ -40,9 +72,9 @@ export function canWalk(from: Cell, to: Cell, map: LocalMap): boolean {
  * error short of it.
  */
 export function stepToward(here: Cell, goal: Cell, map: LocalMap, distance: number): Cell {
-  const end = reachableGoal(here, goal, map);
-  if (end === null) return here;
-  const route = findRoute(here, end, map) ?? [];
+  const plan = plannedRoute(here, goal, map);
+  if (plan === null) return here;
+  const { end, route } = plan;
   // An enemy already in its end cell still walks the last fraction of a cell to its centre.
   const walked = walkPoint(here, route.length > 0 ? route : [end], distance);
   return walked.route.length === 0 ? { x: end.x, y: end.y } : walked.pos;
