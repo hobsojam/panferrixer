@@ -265,7 +265,7 @@ function placePatrollers(map: LocalMap, towns: Town[], targets: readonly Target[
         // A loop whose walk between waypoints strays near the start town is drawn again.
         for (let tries = 0; tries < 30; tries++) {
           beat = drawBeat();
-          if (beat.length >= 2 && walkedCells(beat, map).every(clear)) break;
+          if (beat.length >= 2 && loopStaysClear(beat, map, start, clear)) break;
           beat = [];
         }
         if (beat.length < 2) continue;
@@ -290,6 +290,28 @@ function placePatrollers(map: LocalMap, towns: Town[], targets: readonly Target[
     }
   }
   return patrollers;
+}
+
+/**
+ * True when every cell walked round a loop is clear: the same answer as checking all of
+ * walkedCells, but cheaper when it is false. The legs whose straight line passes nearest the
+ * start are routed first, and the first leg that strays ends the check, so a rejected loop
+ * usually costs one route search instead of one per leg.
+ */
+function loopStaysClear(beat: readonly Cell[], map: LocalMap, start: Cell, clear: (c: Cell) => boolean): boolean {
+  if (!beat.every(clear)) return false;
+  const legs = beat.map((from, i) => ({ from, to: beat[(i + 1) % beat.length] }));
+  legs.sort((a, b) => distanceToSegment(start, a.from, a.to) - distanceToSegment(start, b.from, b.to));
+  return legs.every(({ from, to }) => (findRoute(from, to, map) ?? []).every(clear));
+}
+
+/** Straight-line distance from a point to the segment between two cells. */
+function distanceToSegment(p: Cell, a: Cell, b: Cell): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length2 = dx * dx + dy * dy;
+  const t = length2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / length2));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
 /** Every cell walked round a loop: the terrain route from each waypoint to the next. */

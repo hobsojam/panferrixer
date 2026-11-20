@@ -20,7 +20,7 @@ import {
 import { createInitialState } from "../src/flight";
 import { generateWorld, type Target } from "../src/local-map";
 import { OFFSETS } from "../src/route";
-import { mapOf } from "./helpers";
+import { MANY_WORLDS_TIMEOUT_MS, mapOf } from "./helpers";
 
 // Garrisons: defenders live in the domes, at random, and come out when their dome is hit
 // (design-notes 4.4). Awake, they guard their dome and do not chase far (design-notes 4.10).
@@ -73,7 +73,7 @@ describe("placing the garrisons", () => {
         }
       }
     }
-  });
+  }, MANY_WORLDS_TIMEOUT_MS);
 
   it("the number of defenders varies between networks", () => {
     const counts = new Set<number>();

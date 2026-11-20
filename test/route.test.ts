@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
 import { generateWorld, isEnemyKind } from "../src/local-map";
 import { cellKey, findRoute, findRouteToAny, isPassable, OFFSETS } from "../src/route";
-import { mapOf } from "./helpers";
+import { MANY_WORLDS_TIMEOUT_MS, mapOf } from "./helpers";
 
 describe("passable cells", () => {
   it("high ground is blocked and valleys and ground are not", () => {
@@ -103,7 +103,7 @@ describe("the world leaves a passable path", () => {
         expect(findRouteToAny(towns[0], beside, map, blocked), `seed ${seed} building at ${b.col},${b.row}`).not.toBeNull();
       }
     }
-  });
+  }, MANY_WORLDS_TIMEOUT_MS);
 
   it("every network still gets all its buildings and its hunter", () => {
     const { towns, targets } = generateWorld(config.localMap);

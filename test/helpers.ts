@@ -2,6 +2,14 @@ import type { AppState } from "../src/app";
 import type { DashboardState } from "../src/dashboard";
 import type { LocalMap, Tier } from "../src/local-map";
 
+/**
+ * The time allowed a test that generates many whole worlds in a loop. Each takes a few
+ * seconds on its own, but in a full run every test file has its own worker competing for
+ * the CPU, so the default 5 seconds is too little and they failed only under load. Kept to
+ * these tests so that any other test that hangs still fails fast.
+ */
+export const MANY_WORLDS_TIMEOUT_MS = 30_000;
+
 /** A map from rows of tier digits: 0 valley, 1 ground, 2 high ground. */
 export function mapOf(rows: string[]): LocalMap {
   const tiers = rows.map((r) => [...r].map((ch) => Number(ch) as Tier));

@@ -4,7 +4,7 @@ import { createDashboardState, moveHunters, positionOf, spendAttack, worldFor, t
 import { reachableGoal, stepToward } from "../src/enemy-move";
 import { generateWorld, type LocalMap, type Target } from "../src/local-map";
 import { cellKey, reachableFrom } from "../src/route";
-import { mapOf } from "./helpers";
+import { MANY_WORLDS_TIMEOUT_MS, mapOf } from "./helpers";
 
 const DT = 1 / 60;
 const base = worldFor(config);
@@ -145,5 +145,5 @@ describe("hunter placement", () => {
         expect(reached.has(cellKey(map, t.col, t.row))).toBe(true);
       }
     }
-  });
+  }, MANY_WORLDS_TIMEOUT_MS);
 });
