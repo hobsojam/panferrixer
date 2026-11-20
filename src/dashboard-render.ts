@@ -37,6 +37,7 @@ export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardS
   drawSidePanel(ctx, state, world, cfg);
   drawGauge(ctx, "ENERGY", state.energyCells, cfg.dashboard.energyCells, 330, cfg, "cell", state.time);
   drawGauge(ctx, "SHIELDS", state.shieldPlates, cfg.dashboard.shieldPlates, 384, cfg, "plate", state.time, state.shieldHits);
+  if (isLow(state.energyCells, cfg)) drawLowPower(ctx, state.time, cfg);
 
   drawText(ctx, hintFor(state, soundOn), w / 2, h - 28, 14, c.text, 0.8, "monospace");
 
@@ -553,8 +554,18 @@ function drawPlaceholderMarker(ctx: CanvasRenderingContext2D, cx: number, cy: nu
 }
 
 /**
- * A row of units: energy as rectangular cells, shields as trapezoid plates.
- * The last filled unit flashes when the row is low.
+ * The low-power warning (#15): flashing over the energy gauge, so an empty bank is never a
+ * surprise.
+ */
+function drawLowPower(ctx: CanvasRenderingContext2D, time: number, cfg: Config): void {
+  if (Math.sin(time * 6) < -0.2) return;
+  drawText(ctx, "LOW POWER", cfg.canvas.width / 2, 316, 15, cfg.colors.alert, 1, "monospace");
+}
+
+/**
+ * A row of units: energy as rectangular cells, shields as trapezoid plates. Energy is
+ * fractional, so the current cell shows how much of it is left. The last filled unit flashes
+ * when the row is low.
  */
 function drawGauge(
   ctx: CanvasRenderingContext2D,
@@ -578,10 +589,12 @@ function drawGauge(
 
   drawText(ctx, label, 20, y + height / 2, 14, c.text, 1, "monospace", "left");
 
+  const top = Math.ceil(count) - 1;
   for (let i = 0; i < max; i++) {
     const x = left + i * (unitW + gap);
-    const filled = i < count;
-    const isLastFilled = filled && i === count - 1;
+    const part = Math.max(0, Math.min(1, count - i));
+    const filled = part > 0;
+    const isLastFilled = filled && i === top;
     let alpha = filled ? 1 : 0.18;
     if (isLastFilled && low) {
       alpha = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(time * 9));
@@ -592,7 +605,8 @@ function drawGauge(
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.5;
     traceUnit(ctx, shape, x, y, unitW, height);
-    if (filled) ctx.fill();
+    if (filled && part < 1 && shape === "cell") ctx.fillRect(x, y, unitW * part, height);
+    else if (filled) ctx.fill();
     ctx.stroke();
     if (shape === "plate" && isLastFilled && hitsOnTop > 0) drawCracks(ctx, x, y, unitW, height, hitsOnTop, c.background);
   }

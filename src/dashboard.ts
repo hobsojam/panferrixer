@@ -68,12 +68,20 @@ export interface World {
   defenderGuardCells: number; // an awake defender guards this far round its post (design-notes 4.10)
   viewCols: number; // the mini map's local window, in cells: also the reach of the robot's equipment
   viewRows: number;
+  // The energy and shield economy (#15). Energy is a slow clock: it drains with time and walking.
+  energyMax: number; // battery cells when full
+  shieldMax: number; // armour plates when full
+  hitsPerPlate: number;
+  energyDrainPerSecond: number; // cells drained per second of running time, standing or not
+  energyPerCellWalked: number; // extra cells drained per map cell walked
+  energyDropCells: number; // cells restored by an energy drop
+  armourDropPlates: number; // plates restored by an armour drop
 }
 
 export interface DashboardState {
   row: number;
   col: number;
-  energyCells: number;
+  energyCells: number; // fractional: energy drains gradually within the current cell
   shieldPlates: number;
   time: number; // seconds on the dashboard; drives the state-of-mind trace
   location: number; // index of the town the robot is in; the last one it was in when between towns
@@ -174,6 +182,13 @@ export function worldFor(cfg: Config): World {
       defenderGuardCells: cfg.dashboard.defenderGuardCells,
       viewCols: cfg.localMap.viewCols,
       viewRows: cfg.localMap.viewRows,
+      energyMax: cfg.dashboard.energyCells,
+      shieldMax: cfg.dashboard.shieldPlates,
+      hitsPerPlate: cfg.dashboard.hitsPerPlate,
+      energyDrainPerSecond: cfg.energy.drainPerSecond,
+      energyPerCellWalked: cfg.energy.perCellWalked,
+      energyDropCells: cfg.energy.dropCells,
+      armourDropPlates: cfg.energy.armourDropPlates,
     };
   }
   return cachedWorld;
@@ -671,7 +686,11 @@ export function selectedVerb(state: DashboardState): Verb {
  */
 export function stepDashboard(state: DashboardState, actions: readonly Action[], dt: number, world: World): DashboardStep {
   // While a chooser is open, time stops: no clock, no walking.
-  let s: DashboardState = isPaused(state) ? state : walkStep({ ...state, time: state.time + dt }, dt, world.walkSpeed);
+  let s: DashboardState = state;
+  if (!isPaused(state)) {
+    const walked = walkStep({ ...state, time: state.time + dt }, dt, world.walkSpeed);
+    s = drainEnergy(walked, dt, distanceTo(state.pos, walked.pos.x, walked.pos.y), world);
+  }
   s = { ...s, location: townIndexAt(s.pos, world, s.location) };
   s = collectDrops(s, world);
 
@@ -760,13 +779,62 @@ function distanceTo(pos: Point, x: number, y: number): number {
   return Math.hypot(x - pos.x, y - pos.y);
 }
 
-/** Collects any uncollected drop the robot is standing on. Pickup is automatic, not a verb. */
+/**
+ * Energy drains while time runs (#15): slowly with time alone, faster while walking. It is the
+ * pressure that keeps the robot moving, and the bank never goes below empty. Empty is death,
+ * checked by the app, which knows which screen the robot was on.
+ */
+export function drainEnergy(s: DashboardState, seconds: number, walkedCells: number, world: World): DashboardState {
+  const drain = seconds * world.energyDrainPerSecond + walkedCells * world.energyPerCellWalked;
+  if (drain <= 0) return s;
+  return { ...s, energyCells: Math.max(0, s.energyCells - drain) };
+}
+
+/** True once the batteries are flat. */
+export function isOutOfEnergy(s: DashboardState): boolean {
+  return s.energyCells <= 0;
+}
+
+export type DropKind = "energy" | "armour";
+
+/**
+ * What a building's drop is (design-notes 4.4): a comms centre's electronics give energy; a mine
+ * gives ore, so armour or energy; a dome gives either. Drawn from the target index, so it is
+ * fixed for the world and needs no extra draw from the map generator.
+ */
+export function dropKind(target: Target, index: number): DropKind {
+  if (target.kind === "commsCentre") return "energy";
+  return createRng(index * 7919 + 13)() < 0.5 ? "energy" : "armour";
+}
+
+/** Whether a drop would be wasted: energy at a full bank, armour with every plate whole. */
+function wouldWaste(s: DashboardState, kind: DropKind, world: World): boolean {
+  if (kind === "energy") return s.energyCells >= world.energyMax;
+  return s.shieldPlates >= world.shieldMax && s.shieldHits === 0;
+}
+
+/** Energy adds cells; armour adds whole plates and, once full, mends the cracks on the top one. */
+function applyDrop(s: DashboardState, kind: DropKind, world: World): DashboardState {
+  if (kind === "energy") return { ...s, energyCells: Math.min(world.energyMax, s.energyCells + world.energyDropCells) };
+  const plates = s.shieldPlates + world.armourDropPlates;
+  if (plates >= world.shieldMax) return { ...s, shieldPlates: world.shieldMax, shieldHits: 0 };
+  return { ...s, shieldPlates: plates };
+}
+
+/**
+ * Collects any uncollected drop the robot is standing on. Pickup is automatic, not a verb. A
+ * drop that would be wasted stays where it is, so the player can come back for it.
+ */
 function collectDrops(s: DashboardState, world: World): DashboardState {
-  const picked = s.ruins.filter(
-    (i) => world.targets[i].hasDrop && !s.found.includes(i) && distanceTo(s.pos, world.targets[i].col, world.targets[i].row) <= world.pickupRadius
-  );
-  if (picked.length === 0) return s;
-  return { ...s, found: [...s.found, ...picked] };
+  let next = s;
+  for (const i of s.ruins) {
+    const t = world.targets[i];
+    if (!t.hasDrop || next.found.includes(i) || distanceTo(next.pos, t.col, t.row) > world.pickupRadius) continue;
+    const kind = dropKind(t, i);
+    if (wouldWaste(next, kind, world)) continue;
+    next = { ...applyDrop(next, kind, world), found: [...next.found, i] };
+  }
+  return next;
 }
 
 /** Every uncollected drop in a ruin within the scan's reach, nearest first. */

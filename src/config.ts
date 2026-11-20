@@ -97,9 +97,20 @@ export const config = {
     maxGenerationAttempts: 50,
   },
 
-  // Death (design-notes 3, item 17): zero shields destroys the robot and the game starts again.
+  // Death (design-notes 3, items 17 and 18): zero shields or zero energy ends the robot, and the
+  // game starts again. Each has its own ending, so the player knows which one it was.
   death: {
     restartAfterSeconds: 2, // the wreck shows this long before a press can start a new game
+    powerDownSeconds: 2.5, // flat batteries: the screen flickers, then fades to black over this long
+  },
+
+  // The energy economy (#15). Placeholders, tuned by playtest. Energy is a slow clock that keeps
+  // the robot moving; drops in ruins refill it. Scanning, missiles and grid disable cost nothing.
+  energy: {
+    drainPerSecond: 1 / 90, // a cell every 90 seconds of running time: 15 minutes from full, standing still
+    perCellWalked: 0.02, // walking the width of the map costs about one and a half cells more
+    dropCells: 2, // an energy drop restores two cells (design-notes 4.6)
+    armourDropPlates: 2, // an armour drop restores two plates, about one average attack (design-notes 4.9)
   },
 
   // Missile defence (design-notes 2.9a, 4.8, 4.9). Placeholders, tuned by playtest.
@@ -145,10 +156,10 @@ export const config = {
     altitudeBandsEnabled: false,
   },
 
-  // The dashboard between missiles (design-notes 4.6). Counts are starting values;
-  // drain and refill rules come in a later slice.
+  // The dashboard between missiles (design-notes 4.6). Counts are starting and full values;
+  // drain and refill are in the energy block above.
   dashboard: {
-    energyCells: 10, // placeholder: the energy economy is not designed yet
+    energyCells: 10, // a full bank
     shieldPlates: 8, // design-notes 4.8: starting armour is eight plates
     lowThreshold: 2, // at or below this many cells or plates, the last one flashes and the trace agitates
     tracePoints: 120,

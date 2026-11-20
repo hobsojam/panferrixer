@@ -54,7 +54,7 @@ describe("zero shields is death", () => {
 });
 
 describe("after death", () => {
-  const dead: AppState = { screen: "destroyed", elapsed: 0, seed: 1 };
+  const dead: AppState = { screen: "destroyed", cause: "shields", elapsed: 0, seed: 1, from: null };
 
   it("a press does nothing while the wreck is showing", () => {
     let s: AppState = dead;

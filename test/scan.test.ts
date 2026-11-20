@@ -55,7 +55,8 @@ describe("drops and ruins", () => {
 
   it("walking within the pickup radius collects a drop automatically", () => {
     const world = worldWith([{ col: 20, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
-    const s = { ...scanningAt(19.6, 5), ruins: [0] };
+    // Damaged and drained, so whatever the drop holds is wanted (a full robot leaves it: see energy tests).
+    const s = { ...scanningAt(19.6, 5), ruins: [0], energyCells: 3, shieldPlates: 3 };
     const next = stepDashboard(s, [], DT, world).state;
     expect(next.found).toEqual([0]);
   });

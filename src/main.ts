@@ -1,10 +1,10 @@
-import { createAppState, shieldsDuringAttack, updateApp, type AppState } from "./app";
+import { createAppState, shieldsDuringAttack, updateApp, type AppState, type LiveState } from "./app";
 import { config } from "./config";
 import { worldFor, type Action } from "./dashboard";
 import { renderDashboard } from "./dashboard-render";
 import { combineAim, mouseAim } from "./defence";
 import { renderDefence } from "./defence-render";
-import { renderDestroyed } from "./destroyed-render";
+import { renderDestroyed, renderPowerDown } from "./destroyed-render";
 import { InputController } from "./input";
 import { createInputGate, gateInput } from "./input-gate";
 import { render } from "./render";
@@ -67,16 +67,26 @@ function frame(now: number): void {
   // The pointer is only captured during an attack: hand it back when the attack ends.
   if (state.screen !== "defence") input.releasePointer();
 
-  if (state.screen === "dashboard") {
-    renderDashboard(ctx!, state.dashboard, config, !sound.isMuted());
-  } else if (state.screen === "defence") {
-    renderDefence(ctx!, state.defence, shieldsDuringAttack(state.dashboard, state.defence, config), config, input.isPointerLocked(), attackerName(state.attacker));
-  } else if (state.screen === "destroyed") {
-    renderDestroyed(ctx!, state.elapsed, state.seed, config);
+  if (state.screen !== "destroyed") {
+    renderLive(state);
+  } else if (state.cause === "energy" && state.from) {
+    // A power-down keeps the screen the robot was on, frozen, and switches it off.
+    renderLive(state.from);
+    renderPowerDown(ctx!, state.elapsed, state.seed, config);
   } else {
-    render(ctx!, state.flight, config, state.target.kind, state.shielded);
+    renderDestroyed(ctx!, state.elapsed, state.seed, config);
   }
   requestAnimationFrame(frame);
+}
+
+function renderLive(s: LiveState): void {
+  if (s.screen === "dashboard") {
+    renderDashboard(ctx!, s.dashboard, config, !sound.isMuted());
+  } else if (s.screen === "defence") {
+    renderDefence(ctx!, s.defence, shieldsDuringAttack(s.dashboard, s.defence, config), config, input.isPointerLocked(), attackerName(s.attacker));
+  } else {
+    render(ctx!, s.flight, config, s.target.kind, s.shielded);
+  }
 }
 
 requestAnimationFrame((now) => {
