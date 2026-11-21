@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createAppState, restartAfter, updateApp, type AppInput, type AppState } from "../src/app";
 import { config } from "../src/config";
-import { createDashboardState, dropKind, stepDashboard, worldFor, type DashboardState, type DropKind, type World } from "../src/dashboard";
+import { createDashboardState, stepDashboard, worldFor, type DashboardState, type World } from "../src/dashboard";
 import { createInitialState } from "../src/flight";
-import type { Target } from "../src/local-map";
+import { generateWorld, type Supply, type Target } from "../src/local-map";
 import { eventsBetween } from "../src/sound";
 
 // The energy economy (#15): energy drains with time and walking, drops refill it, and an
@@ -111,53 +111,79 @@ describe("zero energy is death by power-down", () => {
   });
 });
 
-describe("drops refill energy and armour", () => {
-  // Ten domes far apart; the test picks one whose drop is of the kind it wants.
-  const domes: Target[] = Array.from({ length: 10 }, (_, i) => ({ col: 5 + i * 6, row: 5, kind: "dome", hasDrop: true, network: 0 }));
-  const world: World = { ...base, targets: domes };
-  const indexOf = (kind: DropKind) => domes.findIndex((t, i) => dropKind(t, i) === kind);
-
-  /** Standing on the ruin of a dome holding the given kind of drop. */
-  function onDrop(kind: DropKind, over: Partial<DashboardState>): DashboardState {
-    const i = indexOf(kind);
-    return { ...createDashboardState(config), pos: { x: domes[i].col, y: domes[i].row }, ruins: [i], ...over };
+describe("supplies refill energy and armour", () => {
+  /** Standing on the ruin of a dome holding the given supplies. */
+  function onRuin(supplies: Supply[], over: Partial<DashboardState>): { s: DashboardState; world: World } {
+    const dome: Target = { col: 5, row: 5, kind: "dome", supplies, network: 0 };
+    return { s: { ...createDashboardState(config), pos: { x: 5, y: 5 }, ruins: [0], ...over }, world: { ...base, targets: [dome] } };
+  }
+  function step(supplies: Supply[], over: Partial<DashboardState>): DashboardState {
+    const { s, world } = onRuin(supplies, over);
+    return stepDashboard(s, [], DT, world).state;
   }
 
-  it("both kinds turn up among domes", () => {
-    expect(indexOf("energy")).toBeGreaterThanOrEqual(0);
-    expect(indexOf("armour")).toBeGreaterThanOrEqual(0);
-  });
-
-  it("a comms centre's electronics always give energy", () => {
-    for (let i = 0; i < 20; i++) expect(dropKind({ col: 0, row: 0, kind: "commsCentre", hasDrop: true, network: 0 }, i)).toBe("energy");
-  });
-
   it("an energy drop restores cells", () => {
-    const next = stepDashboard(onDrop("energy", { energyCells: 3 }), [], DT, world).state;
-    expect(next.found).toEqual([indexOf("energy")]);
+    const next = step(["energy"], { energyCells: 3 });
+    expect(next.found).toEqual([{ target: 0, supply: "energy" }]);
     expect(next.energyCells).toBeCloseTo(3 + config.energy.dropCells, 2);
   });
 
   it("an energy drop never overfills the bank", () => {
-    const next = stepDashboard(onDrop("energy", { energyCells: FULL - 0.5 }), [], DT, world).state;
+    const next = step(["energy"], { energyCells: FULL - 0.5 });
     expect(next.energyCells).toBe(FULL);
   });
 
   it("an armour drop mends the weakest plates, broken ones first", () => {
-    const next = stepDashboard(onDrop("armour", { plates: [3, 0, 2, 3, 0, 1, 3, 0] }), [], DT, world).state;
+    const next = step(["armour"], { plates: [3, 0, 2, 3, 0, 1, 3, 0] });
     expect(next.plates).toEqual([3, 3, 2, 3, 3, 1, 3, 0]);
   });
 
   it("with no plate broken, an armour drop mends the most cracked", () => {
-    const next = stepDashboard(onDrop("armour", { plates: [3, 2, 1, 3, 3, 1, 3, 3] }), [], DT, world).state;
+    const next = step(["armour"], { plates: [3, 2, 1, 3, 3, 1, 3, 3] });
     expect(next.plates).toEqual([3, 2, 3, 3, 3, 3, 3, 3]);
   });
 
-  it("a drop that would be wasted is left for later", () => {
-    const next = stepDashboard(onDrop("armour", {}), [], DT, world).state;
+  it("a supply that would be wasted is left for later", () => {
+    const { s: full, world } = onRuin(["armour"], {});
+    const next = stepDashboard(full, [], DT, world).state;
     expect(next.found).toEqual([]);
-    // Once damaged, the same drop is taken.
+    // Once damaged, the same supply is taken.
     const later = stepDashboard({ ...next, plates: [3, 3, 3, 2, 3, 3, 3, 3] }, [], DT, world).state;
-    expect(later.found).toEqual([indexOf("armour")]);
+    expect(later.found).toEqual([{ target: 0, supply: "armour" }]);
+  });
+
+  it("a ruin holding both supplies gives both", () => {
+    const next = step(["energy", "armour"], { energyCells: 3, plates: [3, 3, 3, 0, 3, 3, 3, 3] });
+    expect(next.found).toEqual([{ target: 0, supply: "energy" }, { target: 0, supply: "armour" }]);
+    expect(next.energyCells).toBeCloseTo(3 + config.energy.dropCells, 2);
+    expect(next.plates[3]).toBe(config.dashboard.hitsPerPlate);
+  });
+
+  it("from a ruin holding both, only the wanted one is taken and the other waits", () => {
+    const { s, world } = onRuin(["energy", "armour"], { energyCells: 3 });
+    const next = stepDashboard(s, [], DT, world).state;
+    expect(next.found).toEqual([{ target: 0, supply: "energy" }]);
+    const later = stepDashboard({ ...next, plates: [3, 3, 2, 3, 3, 3, 3, 3] }, [], DT, world).state;
+    expect(later.found).toEqual([{ target: 0, supply: "energy" }, { target: 0, supply: "armour" }]);
+  });
+});
+
+describe("what each building holds", () => {
+  const { targets } = generateWorld(config.localMap);
+  const holding = (kind: Target["kind"]) => targets.filter((t) => t.kind === kind);
+
+  it("only domes, mines and comms centres hold supplies", () => {
+    for (const t of targets) if (!["dome", "mine", "commsCentre"].includes(t.kind)) expect(t.supplies).toEqual([]);
+  });
+
+  it("supplies are rolled independently, so some ruins hold nothing and some hold both", () => {
+    const buildings = [...holding("dome"), ...holding("mine"), ...holding("commsCentre")];
+    expect(buildings.some((t) => t.supplies.length === 0)).toBe(true);
+    expect(buildings.some((t) => t.supplies.length === 2)).toBe(true);
+  });
+
+  it("domes are mostly empty", () => {
+    const domes = holding("dome");
+    expect(domes.filter((t) => t.supplies.length === 0).length).toBeGreaterThan(domes.length / 2);
   });
 });

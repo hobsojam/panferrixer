@@ -35,8 +35,8 @@ describe("networks and power stations", () => {
     });
   });
 
-  it("a power station never leaves a drop", () => {
-    for (const t of world.targets) if (t.kind === "power") expect(t.hasDrop).toBe(false);
+  it("a power station never holds supplies", () => {
+    for (const t of world.targets) if (t.kind === "power") expect(t.supplies).toEqual([]);
   });
 });
 

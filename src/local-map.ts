@@ -17,7 +17,9 @@ export interface LocalMapConfig {
   domesPerTown: number; // at least as many as the most defenders a network can draw (design-notes 4.4)
   otherBuildingsPerTown: number; // mines and comms centres, drawn at random
   defendersMax: number; // each network draws 0 to this many defenders, one per dome at most
-  dropChance: number; // chance that a building holds a drop
+  // Supplies (design-notes 4.4): for each building kind, the chance it holds each supply, rolled
+  // independently, so a ruin may hold nothing, one supply or several. Kinds not listed hold none.
+  supplyChances: Partial<Record<TargetKind, Record<Supply, number>>>;
   // Patrollers (#66) walk wide beats across the map, a few in each segment of a grid laid over it.
   patrolSegmentsAcross: number;
   patrolSegmentsDown: number;
@@ -45,11 +47,15 @@ export interface Town {
 /** Placeholder target kinds: the comms centre replaces the original beacon (design-notes 4.4). Art is not designed yet. */
 export type TargetKind = "power" | "hunter" | "defender" | "patroller" | "mine" | "commsCentre" | "dome";
 
+/** The supplies a ruin can hold. Parts are not rolled: they are a fixed set, placed (design-notes 4.4). */
+export type Supply = "energy" | "armour";
+export const SUPPLIES: readonly Supply[] = ["energy", "armour"];
+
 export interface Target {
   col: number;
   row: number;
   kind: TargetKind;
-  hasDrop: boolean; // the drop is hidden under the building; found only once it is destroyed
+  supplies: Supply[]; // hidden under the building; found only once it is destroyed
   network: number; // the town (network) it was placed in. Towns can overlap, so position alone does not say
   home?: number; // a defender's dome (target index); its col and row are the free cell beside it, its post
   beat?: Cell[]; // a patroller's loop of waypoints; its col and row are the first, where it starts
@@ -224,17 +230,32 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
       const isHunter = plan[placed] === "hunter";
       if (isHunter && walkable[cellKey(map, col, row)] !== 1) continue;
       if (!isHunter && !keepsRoutesOpen(map, towns, [...targets.filter((t) => !isEnemyKind(t.kind)), { col, row }])) continue;
-      // Each network has one power station, placed first. It is never a drop: it cannot be destroyed.
-      // The hunter, placed second, is the network's guard on duty. It has no drop.
+      // Each network has one power station, placed first, then its hunter, the guard on duty.
       const step = plan[placed];
       const kind: TargetKind = step === "other" ? OTHER_KINDS[Math.floor(rng() * OTHER_KINDS.length)] : step;
-      const hasDrop = rng() < cfg.dropChance && kind !== "power" && kind !== "hunter";
-      targets.push({ col, row, kind, hasDrop, network });
+      // This draw once rolled a single drop chance. Supplies now have their own stream (rollSupplies),
+      // but the draw stays so every world's layout is unchanged.
+      rng();
+      targets.push({ col, row, kind, supplies: [], network });
       placed += 1;
     }
   }
-  const withGarrisons = [...targets, ...placeDefenders(map, towns, targets, cfg)];
+  const withGarrisons = [...rollSupplies(targets, cfg), ...placeDefenders(map, towns, targets, cfg)];
   return [...withGarrisons, ...placePatrollers(map, towns, withGarrisons, cfg)];
+}
+
+/**
+ * What each building holds (design-notes 4.4): every supply is rolled on its own, from the
+ * building kind's chances, so the kind shapes what is likely without making anything certain.
+ * The power station holds nothing (it cannot be destroyed) and neither does the hunter. Drawn
+ * from its own stream, so changing the chances moves nothing else on the map.
+ */
+function rollSupplies(targets: readonly Target[], cfg: LocalMapConfig): Target[] {
+  const rng = createRng(cfg.worldSeed * 3571 + 9);
+  return targets.map((t) => {
+    const chances = cfg.supplyChances[t.kind];
+    return { ...t, supplies: chances === undefined ? [] : SUPPLIES.filter((supply) => rng() < chances[supply]) };
+  });
 }
 
 /**
@@ -274,7 +295,7 @@ function placePatrollers(map: LocalMap, towns: Town[], targets: readonly Target[
         if (beat.length < 2) continue;
         const first = beat[0];
         occupied.add(cellKey(map, first.x, first.y));
-        patrollers.push({ col: first.x, row: first.y, kind: "patroller", hasDrop: false, network: nearestTown(towns, first), beat });
+        patrollers.push({ col: first.x, row: first.y, kind: "patroller", supplies: [], network: nearestTown(towns, first), beat });
 
         /** Waypoints spread across the segment, ordered round its centre. */
         function drawBeat(): Cell[] {
@@ -362,7 +383,7 @@ function placeDefenders(map: LocalMap, towns: Town[], buildings: readonly Target
         (c) => reached.has(cellKey(map, c.col, c.row)) && isPassable(map, c.col, c.row, blocked)
       );
       if (!post) continue;
-      defenders.push({ ...post, kind: "defender", hasDrop: false, network, home: i });
+      defenders.push({ ...post, kind: "defender", supplies: [], network, home: i });
       placed += 1;
     }
   }

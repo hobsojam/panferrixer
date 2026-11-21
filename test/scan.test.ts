@@ -54,21 +54,21 @@ describe("drops and ruins", () => {
   });
 
   it("walking within the pickup radius collects a drop automatically", () => {
-    const world = worldWith([{ col: 20, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
+    const world = worldWith([{ col: 20, row: 5, kind: "dome", supplies: ["energy"], network: 0 }]);
     // Damaged and drained, so whatever the drop holds is wanted (a full robot leaves it: see energy tests).
     const s = { ...scanningAt(19.6, 5), ruins: [0], energyCells: 3, plates: [3, 3, 3, 0, 0, 0, 0, 0] };
     const next = stepDashboard(s, [], DT, world).state;
-    expect(next.found).toEqual([0]);
+    expect(next.found).toEqual([{ target: 0, supply: "energy" }]);
   });
 
   it("a building with no drop gives nothing when walked over", () => {
-    const world = worldWith([{ col: 20, row: 5, kind: "dome", hasDrop: false, network: 0 }]);
+    const world = worldWith([{ col: 20, row: 5, kind: "dome", supplies: [], network: 0 }]);
     const next = stepDashboard({ ...scanningAt(20, 5), ruins: [0] }, [], DT, world).state;
     expect(next.found).toEqual([]);
   });
 
   it("a drop under a building that still stands is not collected", () => {
-    const world = worldWith([{ col: 20, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
+    const world = worldWith([{ col: 20, row: 5, kind: "dome", supplies: ["energy"], network: 0 }]);
     const next = stepDashboard(scanningAt(20, 5), [], DT, world).state;
     expect(next.found).toEqual([]);
   });
@@ -82,15 +82,15 @@ describe("scanning", () => {
   });
 
   it("finds nothing beyond the ring's reach", () => {
-    const world = worldWith([{ col: 5 + config.dashboard.scanRadius + 1, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
+    const world = worldWith([{ col: 5 + config.dashboard.scanRadius + 1, row: 5, kind: "dome", supplies: ["energy"], network: 0 }]);
     expect(scan({ ...scanningAt(5, 5), ruins: [0] }, world).scan?.blips).toEqual([]);
   });
 
   it("marks every ruin with a drop within reach, nearest first", () => {
     const world = worldWith([
-      { col: 5, row: 5 + 10, kind: "dome", hasDrop: true, network: 0 },
-      { col: 5 + 3, row: 5, kind: "mine", hasDrop: true, network: 0 },
-      { col: 5 - 8, row: 5, kind: "dome", hasDrop: true, network: 0 },
+      { col: 5, row: 5 + 10, kind: "dome", supplies: ["energy"], network: 0 },
+      { col: 5 + 3, row: 5, kind: "mine", supplies: ["energy"], network: 0 },
+      { col: 5 - 8, row: 5, kind: "dome", supplies: ["energy"], network: 0 },
     ]);
     const s = scan({ ...scanningAt(5, 5), ruins: [0, 1, 2] }, world);
     expect(s.scan?.blips).toEqual([1, 2, 0]);
@@ -99,18 +99,18 @@ describe("scanning", () => {
 
   it("does not mark ruins without a drop, buildings still standing, or drops already found", () => {
     const world = worldWith([
-      { col: 6, row: 5, kind: "dome", hasDrop: false, network: 0 },
-      { col: 7, row: 5, kind: "dome", hasDrop: true, network: 0 },
-      { col: 8, row: 5, kind: "dome", hasDrop: true, network: 0 },
-      { col: 9, row: 5, kind: "dome", hasDrop: true, network: 0 },
+      { col: 6, row: 5, kind: "dome", supplies: [], network: 0 },
+      { col: 7, row: 5, kind: "dome", supplies: ["energy"], network: 0 },
+      { col: 8, row: 5, kind: "dome", supplies: ["energy"], network: 0 },
+      { col: 9, row: 5, kind: "dome", supplies: ["energy"], network: 0 },
     ]);
-    const s = scan({ ...scanningAt(5, 5), ruins: [0, 2, 3], found: [3] }, world);
+    const s = scan({ ...scanningAt(5, 5), ruins: [0, 2, 3], found: [{ target: 3, supply: "energy" }] }, world);
     expect(s.scan?.blips).toEqual([2]);
   });
 
   it("is close when the nearest drop is within the close radius", () => {
-    const near = worldWith([{ col: 5, row: 5 - 3, kind: "dome", hasDrop: true, network: 0 }]);
-    const far = worldWith([{ col: 5 + 9, row: 5, kind: "dome", hasDrop: true, network: 0 }]);
+    const near = worldWith([{ col: 5, row: 5 - 3, kind: "dome", supplies: ["energy"], network: 0 }]);
+    const far = worldWith([{ col: 5 + 9, row: 5, kind: "dome", supplies: ["energy"], network: 0 }]);
     expect(scan({ ...scanningAt(5, 5), ruins: [0] }, near).scan?.close).toBe(true);
     expect(scan({ ...scanningAt(5, 5), ruins: [0] }, far).scan?.close).toBe(false);
   });
@@ -118,8 +118,8 @@ describe("scanning", () => {
 
 describe("blips", () => {
   const world = worldWith([
-    { col: 5 + 2, row: 5, kind: "dome", hasDrop: true, network: 0 },
-    { col: 5 + 11, row: 5, kind: "dome", hasDrop: true, network: 0 },
+    { col: 5 + 2, row: 5, kind: "dome", supplies: ["energy"], network: 0 },
+    { col: 5 + 11, row: 5, kind: "dome", supplies: ["energy"], network: 0 },
   ]);
   const scanned = stepDashboard({ ...scanningAt(5, 5), ruins: [0, 1], time: 10 }, ["activate"], DT, world).state;
   const at = (seconds: number, extra: Partial<DashboardState> = {}) => ({ ...scanned, time: scanned.pulseStarted! + seconds, ...extra });
@@ -151,7 +151,7 @@ describe("blips", () => {
   });
 
   it("goes out once its drop is collected", () => {
-    expect(blipStrength(at(world.scanPulseSeconds, { found: [0] }), 0, world)).toBe(0);
+    expect(blipStrength(at(world.scanPulseSeconds, { found: [{ target: 0, supply: "energy" }] }), 0, world)).toBe(0);
   });
 
   it("a building the scan did not mark never shows a blip", () => {

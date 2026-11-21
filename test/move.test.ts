@@ -128,7 +128,7 @@ describe("walking", () => {
 
 describe("buildings block the robot (design-notes 4.7)", () => {
   // A dome at (6, 5) on open ground.
-  const withDome: World = { ...flatWorld, targets: [{ col: 6, row: 5, kind: "dome", hasDrop: false, network: 0 }] };
+  const withDome: World = { ...flatWorld, targets: [{ col: 6, row: 5, kind: "dome", supplies: [], network: 0 }] };
   const at = (x: number, y: number): DashboardState => ({ ...createDashboardState(config), pos: { x, y } });
 
   it("a route goes around an intact building, never through it", () => {
@@ -159,7 +159,7 @@ describe("buildings block the robot (design-notes 4.7)", () => {
   });
 
   it("a hunter is not a building and does not block", () => {
-    const withHunter: World = { ...flatWorld, targets: [{ col: 6, row: 5, kind: "hunter", hasDrop: false, network: 0 }] };
+    const withHunter: World = { ...flatWorld, targets: [{ col: 6, row: 5, kind: "hunter", supplies: [], network: 0 }] };
     expect(buildingCells(at(5, 5), withHunter).size).toBe(0);
   });
 
