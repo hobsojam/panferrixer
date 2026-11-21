@@ -63,9 +63,15 @@ describe("missile supplies", () => {
     return step({ ...createDashboardState(config), pos: { x: 5, y: 5 }, ruins: [0], ...over }, [], w).state;
   }
 
-  it("a missile supply refills the rack", () => {
-    const next = onRuin(["missiles"], { missiles: 2 });
-    expect(next.missiles).toBe(2 + config.dashboard.missileDropCount);
+  it("each missile found goes in the rack", () => {
+    const next = onRuin(["missiles", "missiles"], { missiles: 2 });
+    expect(next.missiles).toBe(4);
+    expect(next.found).toHaveLength(2);
+  });
+
+  it("with room for one, one is taken and the other waits", () => {
+    const next = onRuin(["missiles", "missiles"], { missiles: RACK - 1 });
+    expect(next.missiles).toBe(RACK);
     expect(next.found).toEqual([{ target: 0, supply: "missiles" }]);
   });
 
@@ -79,5 +85,32 @@ describe("missile supplies", () => {
 
   it("some buildings in the world hold missiles", () => {
     expect(generateWorld(config.localMap).targets.some((t) => t.supplies.includes("missiles"))).toBe(true);
+  });
+});
+
+describe("wrecks", () => {
+  // A hunter posted at (5, 5) that walked to (15, 5) before it was destroyed there.
+  const hunter: Target = { col: 5, row: 5, kind: "hunter", supplies: ["missiles", "energy"], network: 0 };
+  const w: World = { ...world, targets: [hunter] };
+  const wrecked = (pos: { x: number; y: number }): DashboardState => ({
+    ...createDashboardState(config),
+    pos,
+    ruins: [0],
+    hunterPos: { 0: { x: 15, y: 5 } },
+    missiles: 3,
+    energyCells: 4,
+  });
+
+  it("are searched where the enemy fell, not at its post", () => {
+    expect(step(wrecked({ x: 5, y: 5 }), [], w).state.found).toEqual([]);
+    const there = step(wrecked({ x: 15, y: 5 }), [], w).state;
+    expect(there.found).toHaveLength(2);
+    expect(there.missiles).toBe(4);
+  });
+
+  it("a scan marks the wreck at where it fell", () => {
+    // From (25, 5) the wreck is 10 cells away, inside the ring; the post is 20, beyond it.
+    const scanned = step({ ...wrecked({ x: 25, y: 5 }), row: 0, col: 1 }, ["activate"], w).state;
+    expect(scanned.scan?.blips).toEqual([0]);
   });
 });

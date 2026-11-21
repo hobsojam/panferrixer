@@ -122,10 +122,20 @@ describe("supplies refill energy and armour", () => {
     return stepDashboard(s, [], DT, world).state;
   }
 
-  it("an energy drop restores cells", () => {
-    const next = step(["energy"], { energyCells: 3 });
+  it("each unit of energy restores a cell", () => {
+    const next = step(["energy", "energy"], { energyCells: 3 });
+    expect(next.found).toEqual([{ target: 0, supply: "energy" }, { target: 0, supply: "energy" }]);
+    expect(next.energyCells).toBeCloseTo(5, 2);
+  });
+
+  it("units that would overfill are left for later, the rest taken", () => {
+    const { s, world } = onRuin(["energy", "energy"], { energyCells: FULL - 0.5 });
+    const next = stepDashboard(s, [], DT, world).state;
     expect(next.found).toEqual([{ target: 0, supply: "energy" }]);
-    expect(next.energyCells).toBeCloseTo(3 + config.energy.dropCells, 2);
+    expect(next.energyCells).toBe(FULL);
+    // Drained again, the robot finds the second cell still there.
+    const later = stepDashboard({ ...next, energyCells: 4 }, [], DT, world).state;
+    expect(later.found).toHaveLength(2);
   });
 
   it("an energy drop never overfills the bank", () => {
@@ -133,13 +143,13 @@ describe("supplies refill energy and armour", () => {
     expect(next.energyCells).toBe(FULL);
   });
 
-  it("an armour drop mends the weakest plates, broken ones first", () => {
-    const next = step(["armour"], { plates: [3, 0, 2, 3, 0, 1, 3, 0] });
+  it("each unit of armour fully mends the weakest plate, broken ones first", () => {
+    const next = step(["armour", "armour"], { plates: [3, 0, 2, 3, 0, 1, 3, 0] });
     expect(next.plates).toEqual([3, 3, 2, 3, 3, 1, 3, 0]);
   });
 
-  it("with no plate broken, an armour drop mends the most cracked", () => {
-    const next = step(["armour"], { plates: [3, 2, 1, 3, 3, 1, 3, 3] });
+  it("with no plate broken, armour mends the most cracked", () => {
+    const next = step(["armour", "armour"], { plates: [3, 2, 1, 3, 3, 1, 3, 3] });
     expect(next.plates).toEqual([3, 2, 3, 3, 3, 3, 3, 3]);
   });
 
@@ -155,7 +165,7 @@ describe("supplies refill energy and armour", () => {
   it("a ruin holding both supplies gives both", () => {
     const next = step(["energy", "armour"], { energyCells: 3, plates: [3, 3, 3, 0, 3, 3, 3, 3] });
     expect(next.found).toEqual([{ target: 0, supply: "energy" }, { target: 0, supply: "armour" }]);
-    expect(next.energyCells).toBeCloseTo(3 + config.energy.dropCells, 2);
+    expect(next.energyCells).toBeCloseTo(4, 2);
     expect(next.plates[3]).toBe(config.dashboard.hitsPerPlate);
   });
 
@@ -168,22 +178,44 @@ describe("supplies refill energy and armour", () => {
   });
 });
 
-describe("what each building holds", () => {
+describe("what each building and enemy holds", () => {
   const { targets } = generateWorld(config.localMap);
   const holding = (kind: Target["kind"]) => targets.filter((t) => t.kind === kind);
 
-  it("only domes, mines and comms centres hold supplies", () => {
-    for (const t of targets) if (!["dome", "mine", "commsCentre"].includes(t.kind)) expect(t.supplies).toEqual([]);
+  it("power stations and patrollers hold nothing", () => {
+    for (const t of targets) if (t.kind === "power" || t.kind === "patroller") expect(t.supplies).toEqual([]);
   });
 
-  it("supplies are rolled independently, so some ruins hold nothing and some hold both", () => {
+  it("never more units than a kind's maximum", () => {
+    for (const t of targets) {
+      const rolls = config.localMap.supplyChances[t.kind as keyof typeof config.localMap.supplyChances];
+      if (rolls === undefined) continue;
+      for (const supply of ["energy", "armour", "missiles"] as const) {
+        expect(t.supplies.filter((s) => s === supply).length).toBeLessThanOrEqual(rolls[supply].max);
+      }
+    }
+  });
+
+  it("hunters lean to missiles and energy, defenders to armour", () => {
+    const count = (kind: Target["kind"], supply: Supply) => holding(kind).reduce((n, t) => n + t.supplies.filter((s) => s === supply).length, 0) / holding(kind).length;
+    expect(count("hunter", "missiles")).toBeGreaterThan(count("defender", "missiles"));
+    expect(count("defender", "armour")).toBeGreaterThan(count("hunter", "armour"));
+  });
+
+  it("supplies are rolled unit by unit, so what a building holds varies", () => {
     const buildings = [...holding("dome"), ...holding("mine"), ...holding("commsCentre")];
-    expect(buildings.some((t) => t.supplies.length === 0)).toBe(true);
-    expect(buildings.some((t) => t.supplies.length === 2)).toBe(true);
+    const sizes = new Set(buildings.map((t) => t.supplies.length));
+    expect(sizes.size).toBeGreaterThan(2);
+    expect(buildings.some((t) => new Set(t.supplies).size >= 2)).toBe(true);
   });
 
-  it("domes are mostly empty", () => {
-    const domes = holding("dome");
-    expect(domes.filter((t) => t.supplies.length === 0).length).toBeGreaterThan(domes.length / 2);
+  it("every dome holds at least one missile, so a hit with the last missile pays it back", () => {
+    for (const t of holding("dome")) expect(t.supplies.filter((s) => s === "missiles").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("domes are the arsenal: they hold more missiles than any other kind of building", () => {
+    const missilesPer = (kind: Target["kind"]) => holding(kind).reduce((n, t) => n + t.supplies.filter((s) => s === "missiles").length, 0) / holding(kind).length;
+    expect(missilesPer("dome")).toBeGreaterThan(missilesPer("mine"));
+    expect(missilesPer("dome")).toBeGreaterThan(missilesPer("commsCentre"));
   });
 });

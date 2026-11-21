@@ -459,8 +459,8 @@ function drawFullMap(
   }
 
   for (const index of state.scan?.blips ?? []) {
-    const t = world.targets[index];
-    const [bx, by] = toScreen(t.col, t.row);
+    const at = positionOf(state, index, world);
+    const [bx, by] = toScreen(at.x, at.y);
     drawBlip(ctx, bx, by, 2.5, blipStrength(state, index, world), c.energy);
   }
 
