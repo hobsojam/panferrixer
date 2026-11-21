@@ -58,7 +58,7 @@ function dashboardEvents(prev: DashboardState, next: DashboardState, cfg: Config
     if (next.scan.blips.length === 0) events.push("scanNothing");
     else events.push(next.scan.close ? "scanNear" : "scanFar");
   }
-  if (next.found.length > prev.found.length) events.push("pickup");
+  if (next.found.length > prev.found.length || next.parts.length > prev.parts.length) events.push("pickup");
 
   const wasLow = isLow(prev.energyCells, cfg) || isLow(standing(prev.plates), cfg);
   const low = isLow(next.energyCells, cfg) || isLow(standing(next.plates), cfg);
