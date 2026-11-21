@@ -1,5 +1,5 @@
 import { NETWORK } from "./map";
-import { cellKey, findRoute, isPassable, OFFSETS, reachableFrom, type Cell } from "./route";
+import { cellKey, findRoute, isPassable, OFFSETS, reachableFrom, reachableMask, type Cell } from "./route";
 import { createRng } from "./rng";
 
 /** 0 = valley, 1 = ground, 2 = high ground. */
@@ -200,6 +200,9 @@ function cheapestPath(map: LocalMap, sources: Cell[], isGoal: (x: number, y: num
 function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target[] {
   const rng = createRng(cfg.worldSeed * 6151 + 1);
   const targets: Target[] = [];
+  // Where a hunter may stand: the terrain no longer changes once the towns are joined, so this
+  // is worked out once, not for every cell a hunter is tried on.
+  const walkable = reachableMask(towns[0], map);
   const plan: readonly ("power" | "hunter" | "dome" | "other")[] = [
     "power",
     "hunter",
@@ -219,7 +222,7 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
       // The hunter is not a building and may stand anywhere on ground the robot can walk to,
       // but never on high ground, which blocks enemies too.
       const isHunter = plan[placed] === "hunter";
-      if (isHunter && !reachableFrom(towns[0], map).has(cellKey(map, col, row))) continue;
+      if (isHunter && walkable[cellKey(map, col, row)] !== 1) continue;
       if (!isHunter && !keepsRoutesOpen(map, towns, [...targets.filter((t) => !isEnemyKind(t.kind)), { col, row }])) continue;
       // Each network has one power station, placed first. It is never a drop: it cannot be destroyed.
       // The hunter, placed second, is the network's guard on duty. It has no drop.
@@ -374,9 +377,10 @@ function placeDefenders(map: LocalMap, towns: Town[], buildings: readonly Target
 export function keepsRoutesOpen(map: LocalMap, towns: readonly Town[], buildings: readonly { col: number; row: number }[]): boolean {
   if (buildings.some((b) => towns.some((t) => t.x === b.col && t.y === b.row))) return false;
   const blocked = new Set(buildings.map((b) => cellKey(map, b.col, b.row)));
-  const reached = reachableFrom(towns[0], map, blocked);
-  if (!towns.every((t) => reached.has(cellKey(map, t.x, t.y)))) return false;
-  return buildings.every((b) => OFFSETS.some(([dx, dy]) => reached.has(cellKey(map, b.col + dx, b.row + dy)) && isPassable(map, b.col + dx, b.row + dy, blocked)));
+  const reached = reachableMask(towns[0], map, blocked);
+  const has = (x: number, y: number) => x >= 0 && y >= 0 && x < map.cols && y < map.rows && reached[cellKey(map, x, y)] === 1;
+  if (!towns.every((t) => has(t.x, t.y))) return false;
+  return buildings.every((b) => OFFSETS.some(([dx, dy]) => has(b.col + dx, b.row + dy) && isPassable(map, b.col + dx, b.row + dy, blocked)));
 }
 
 /** Averages each cell with its neighbours, clamping at the edges. */
