@@ -14,22 +14,38 @@ have not been implemented yet.
 
 The playable prototype currently includes:
 
-- A persistent dashboard with the robot's state-of-mind trace, energy and shield displays,
-  action panels, a map, and synthesised sound effects.
-- One generated world containing connected towns, buildings, valleys, and impassable high
-  ground.
-- Local and full-map views, plus pathfinding that walks the robot to a chosen reachable cell.
-- Missile targeting against nearby buildings.
-- A forward-looking wireframe missile flight with generated terrain, terminal target art,
-  collisions, misses, and explosion effects.
-- Network shields that can be suppressed for a timed window by striking a power station or
-  using grid disable.
-- Persistent destruction: a successful unshielded strike leaves a ruin on the map.
-- A visible scan pulse that searches for drops beneath destroyed buildings, plus automatic
-  collection when the robot reaches one.
+- **The dashboard:** the robot's state-of-mind trace, energy and armour displays, action
+  panels, a map, and synthesised sound effects.
+- **One generated world:** ten towns, each the centre of a network with its power station,
+  domes and other buildings, joined by valleys and cut up by impassable high ground.
+- **Maps and movement:** local and full-map views, plus pathfinding that walks the robot to a
+  chosen reachable cell. Intact buildings block the way; ruins do not.
+- **Missile strikes:** targeting nearby buildings and enemies, then a forward-looking
+  wireframe flight over generated terrain, with terminal target art, collisions, misses and
+  explosions. A nearer target is a shorter flight.
+- **Network shields:** suppressed for a timed window by striking a power station or using
+  grid disable.
+- **Persistent destruction:** a successful unshielded strike leaves a ruin on the map.
+- **Drops:** a visible scan pulse searches for energy and armour drops beneath ruins, and
+  walking close enough collects them.
+- **Enemies that move in real time:**
+  - Each network's **hunter** guards its town. Coming within sight alerts it. It closes in
+    over its own network's ground, fires across the edge when the robot is in range, and
+    makes rounds of the domes while its network's power is cut.
+  - **Defenders** wait hidden in domes until disturbed, then guard the area around their dome.
+  - **Patrollers** walk wide loops between the towns, investigate scans, missile hits and
+    power cuts, and run to the nearest armed enemy for help when they see the robot. They are
+    lightly armed themselves.
+  - Enemies carry a limited magazine and withdraw to a dome to rearm once it is empty.
+- **Incoming attacks:** a first-person turret defence in which the player turns and fires
+  at incoming missiles. Each missile that gets through cracks the armour plate facing it.
+  Choosing a target or a walk point stops time, so there is always a chance to strike back.
+- **Energy and armour:** energy drains with time and walking. Standing still out of danger
+  mends cracked plates at an energy cost. Running out of energy, or losing every armour
+  plate, destroys the robot and starts a new game.
 
-Enemies, combat against the robot, resource depletion, upgrades, saving, and the complete
-game objective are still planned rather than playable.
+Upgrades, missile restocking, saving, and the complete game objective are still planned
+rather than playable.
 
 ## Playing
 
@@ -47,7 +63,8 @@ Open the local URL printed by Vite.
 
 ## Controls
 
-The prototype is keyboard-only.
+The prototype is played with the keyboard. During an incoming attack, the mouse can also aim
+the turret.
 
 | Context | Controls |
 |---|---|
@@ -59,12 +76,16 @@ The prototype is keyboard-only.
 | Missile targeting | Use the arrow keys to position the cross near a building. Space or Enter fires at the selected target; Escape cancels. |
 | Missile flight | Hold Left or Right to steer. The missile flies forward at a fixed speed and altitude. |
 | Flight result | Press Space or Enter to return to the dashboard. |
+| Incoming attack | Arrow keys turn the turret; hold Space to fire. Or click to capture the mouse, then move it to aim and hold the left button to fire; Escape releases it. The dashboard returns by itself when the attack is over. |
+| Robot destroyed | Once the wreck has shown, press Space or Enter to start a new game. |
 
 ## How the prototype works
 
-The dashboard and missile flight are two screens in one state machine. Dashboard state is
-kept across flights, so movement, destroyed buildings, and collected drops persist when a
-flight ends.
+The dashboard, missile flight, incoming attack, and destroyed screens are one state machine,
+updated at a fixed timestep. Dashboard state is kept across the other screens, so movement,
+destroyed buildings, collected drops, energy and armour persist. Enemies, the shield clock
+and the batteries keep running during flights and attacks; time stops only while choosing a
+missile target or a walk point.
 
 The world is generated deterministically as a single terrain grid. Towns and their buildings
 are placed across the grid, routes connect passable cells, and movement refuses destinations
@@ -84,22 +105,38 @@ building into a ruin. Drops remain hidden until their building has been destroye
 then sends a visible pulse across the map and gives progressively better information at
 closer ranges. Walking close enough collects the drop automatically.
 
+Enemies route over the terrain only: they cannot cross high ground but may pass through
+buildings. Each one is a small state machine (posted, patrolling, alerted, rearming, and for
+patrollers investigating and running for help). An alerted enemy in range opens an attack,
+after which a short breather lets the player reply before anyone may attack again.
+
 ## Project layout
 
 | Path | Purpose |
 |---|---|
-| `src/app.ts` | Top-level dashboard/flight state machine |
-| `src/dashboard.ts` | Dashboard actions, movement, scanning, ruins, and drops |
+| `src/main.ts` | Browser entry point: canvas, game loop, and screen rendering |
+| `src/app.ts` | Top-level state machine across the dashboard, flight, attack, and destroyed screens |
+| `src/dashboard.ts` | Dashboard actions, movement, scanning, ruins, drops, energy, armour, and enemy behaviour |
 | `src/dashboard-render.ts` | Dashboard, maps, routes, and status rendering |
-| `src/local-map.ts` | Deterministic world, towns, terrain tiers, and buildings |
+| `src/local-map.ts` | Deterministic world, towns, terrain tiers, buildings, and enemy placement |
+| `src/map.ts` | Where the ten networks sit on the world map |
 | `src/route.ts` | Passability and route finding |
+| `src/enemy-move.ts` | Enemy movement over the terrain, with remembered routes |
+| `src/defence.ts` | Incoming-attack turret simulation |
+| `src/defence-render.ts` | Incoming-attack rendering |
+| `src/armour.ts` | Armour plates: which plate a hit cracks, mending, and replacement |
+| `src/plates.ts` | Armour plate drawing shared by the dashboard and the attack view |
+| `src/destroyed-render.ts` | The robot-destroyed screen |
 | `src/flight.ts` | Fixed-timestep missile simulation |
 | `src/terrain.ts` | Seeded flight terrain and flyability validation |
 | `src/render.ts` | Missile-flight rendering |
 | `src/building-art.ts` | Shared line art for building targets |
 | `src/explosion.ts` | Hit and crash effects |
 | `src/sound.ts` | Synthesised dashboard and missile-flight sound effects |
-| `src/input.ts` | Keyboard actions and steering input |
+| `src/input.ts` | Keyboard and mouse input |
+| `src/input-gate.ts` | Keeps a press on one screen from carrying over to the next |
+| `src/rng.ts` | Seeded random numbers |
+| `src/types.ts` | Shared flight-terrain types |
 | `src/config.ts` | Tuning values and display configuration |
 | `test/` | Unit tests for the game rules and generated terrain |
 
