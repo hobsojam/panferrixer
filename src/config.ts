@@ -236,6 +236,10 @@ export const config = {
       mine: { energy: 0.3, armour: 0.6 },
       commsCentre: { energy: 0.7, armour: 0.1 },
     },
+    // Parts (design-notes 4.4): a fixed set placed over the world, not rolled. Placeholders.
+    partCount: 6, // the original's six pieces
+    partWeights: { dome: 3, commsCentre: 1 }, // domes are the haystack; electronics may hold a part too
+    partsPerNetworkMax: 2, // some networks hold none and a few hold two
     // Patrollers (#66): wide beats between the towns, a few in each segment of the map. Placeholders.
     patrolSegmentsAcross: 3,
     patrolSegmentsDown: 2,

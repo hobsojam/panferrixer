@@ -20,6 +20,10 @@ export interface LocalMapConfig {
   // Supplies (design-notes 4.4): for each building kind, the chance it holds each supply, rolled
   // independently, so a ruin may hold nothing, one supply or several. Kinds not listed hold none.
   supplyChances: Partial<Record<TargetKind, Record<Supply, number>>>;
+  // Parts (design-notes 4.4): a fixed set placed over the world, not rolled per building.
+  partCount: number; // how many parts the world holds
+  partWeights: Partial<Record<TargetKind, number>>; // how likely each building kind is to be chosen; kinds not listed are never chosen
+  partsPerNetworkMax: number; // no network holds more than this many, so they spread out
   // Patrollers (#66) walk wide beats across the map, a few in each segment of a grid laid over it.
   patrolSegmentsAcross: number;
   patrolSegmentsDown: number;
@@ -56,6 +60,7 @@ export interface Target {
   row: number;
   kind: TargetKind;
   supplies: Supply[]; // hidden under the building; found only once it is destroyed
+  part?: number; // which part (0 to partCount - 1) lies under the building, if any; hidden like supplies
   network: number; // the town (network) it was placed in. Towns can overlap, so position alone does not say
   home?: number; // a defender's dome (target index); its col and row are the free cell beside it, its post
   beat?: Cell[]; // a patroller's loop of waypoints; its col and row are the first, where it starts
@@ -240,7 +245,7 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
       placed += 1;
     }
   }
-  const withGarrisons = [...rollSupplies(targets, cfg), ...placeDefenders(map, towns, targets, cfg)];
+  const withGarrisons = [...placeParts(map, towns, rollSupplies(targets, cfg), cfg), ...placeDefenders(map, towns, targets, cfg)];
   return [...withGarrisons, ...placePatrollers(map, towns, withGarrisons, cfg)];
 }
 
@@ -256,6 +261,43 @@ function rollSupplies(targets: readonly Target[], cfg: LocalMapConfig): Target[]
     const chances = cfg.supplyChances[t.kind];
     return { ...t, supplies: chances === undefined ? [] : SUPPLIES.filter((supply) => rng() < chances[supply]) };
   });
+}
+
+/**
+ * Where the parts lie (design-notes 4.4): a fixed set of `partCount`, placed rather than rolled,
+ * so the set is always complete and never duplicated. At most one per building; none in the
+ * starting town, so the first part takes some exploring; no more than `partsPerNetworkMax` in any
+ * network, so they spread out without a "one per town" pattern; and only in a building whose
+ * ruin can be walked to while every other building still stands. Buildings are chosen at random,
+ * weighted by kind (domes are the haystack). Drawn from its own stream, so nothing else moves.
+ * If too few buildings qualify, fewer parts are placed; the tests hold the default world to the
+ * full set.
+ */
+function placeParts(map: LocalMap, towns: Town[], targets: readonly Target[], cfg: LocalMapConfig): Target[] {
+  const rng = createRng(cfg.worldSeed * 5227 + 11);
+  const blocked = new Set(targets.filter((t) => !isEnemyKind(t.kind)).map((t) => cellKey(map, t.col, t.row)));
+  const walkable = reachableMask(towns[cfg.startTown], map, blocked);
+  const reachable = (t: Target) =>
+    OFFSETS.some(([dx, dy]) => {
+      const x = t.col + dx;
+      const y = t.row + dy;
+      return x >= 0 && y >= 0 && x < map.cols && y < map.rows && walkable[cellKey(map, x, y)] === 1;
+    });
+  let candidates = targets
+    .map((t, index) => ({ index, weight: cfg.partWeights[t.kind] ?? 0, network: t.network }))
+    .filter((c) => c.weight > 0 && c.network !== cfg.startTown && reachable(targets[c.index]));
+  const perNetwork = new Map<number, number>();
+  const parts = new Map<number, number>(); // target index to part
+  while (parts.size < cfg.partCount && candidates.length > 0) {
+    const total = candidates.reduce((sum, c) => sum + c.weight, 0);
+    let pick = rng() * total;
+    const chosen = candidates.find((c) => (pick -= c.weight) < 0) ?? candidates[candidates.length - 1];
+    parts.set(chosen.index, parts.size);
+    const count = (perNetwork.get(chosen.network) ?? 0) + 1;
+    perNetwork.set(chosen.network, count);
+    candidates = candidates.filter((c) => c !== chosen && (c.network !== chosen.network || count < cfg.partsPerNetworkMax));
+  }
+  return targets.map((t, index) => (parts.has(index) ? { ...t, part: parts.get(index) } : t));
 }
 
 /**

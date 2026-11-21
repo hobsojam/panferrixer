@@ -25,7 +25,7 @@ export const AVAILABLE_VERBS: readonly Verb[] = ["move", "scan", "missile", "gri
  */
 export interface ScanResult {
   origin: Point;
-  blips: number[]; // target indices of ruins still holding a supply
+  blips: number[]; // target indices of ruins still holding a supply or a part
   close: boolean; // the nearest blip is within the close radius, for the sound
 }
 
@@ -50,6 +50,7 @@ export interface World {
   range: number;
   walkSpeed: number; // cells per second
   pickupRadius: number; // a drop within this many cells is collected automatically
+  partCount: number; // how many parts the world holds: the whole set
   closeRadius: number; // a hunter this close to a scan always wakes
   scanRadius: number; // how far a scan's ring reaches
   suppressionSeconds: number; // how long a network's shields stay down once opened
@@ -108,6 +109,7 @@ export interface DashboardState {
   zoom: "local" | "full"; // the mini map: a window around the robot, or the whole world
   ruins: number[]; // indices of targets destroyed by a missile
   found: Salvage[]; // supplies the robot has collected, each from its ruin
+  parts: number[]; // the parts the robot has collected, in the order found
   scan: ScanResult | null; // the last scan, shown until the next one
   // Network power: for each network (town index), the dashboard time at which its shields come back.
   // A network is suppressed while its time is ahead of the clock.
@@ -203,6 +205,7 @@ export function worldFor(cfg: Config): World {
       range: cfg.dashboard.targetRange,
       walkSpeed: cfg.dashboard.walkSpeed,
       pickupRadius: cfg.dashboard.pickupRadius,
+      partCount: cfg.localMap.partCount,
       closeRadius: cfg.dashboard.closeRadius,
       scanRadius: cfg.dashboard.scanRadius,
       suppressionSeconds: cfg.dashboard.suppressionSeconds,
@@ -263,6 +266,7 @@ export function createDashboardState(cfg: Config): DashboardState {
     zoom: "local",
     ruins: [],
     found: [],
+    parts: [],
     scan: null,
     suppressedUntil: {},
     gridReadyAt: 0,
@@ -1159,6 +1163,17 @@ export function uncollected(s: DashboardState, index: number, world: World): Sup
   return world.targets[index].supplies.filter((supply) => !s.found.some((f) => f.target === index && f.supply === supply));
 }
 
+/** Whether a target's ruin still holds a part the robot has not collected. */
+function holdsPart(s: DashboardState, index: number, world: World): boolean {
+  const part = world.targets[index].part;
+  return part !== undefined && !s.parts.includes(part);
+}
+
+/** Whether a ruin still holds anything worth a scan's mark: a supply or a part. */
+function holdsSalvage(s: DashboardState, index: number, world: World): boolean {
+  return uncollected(s, index, world).length > 0 || holdsPart(s, index, world);
+}
+
 /** Whether a supply would be wasted: energy at a full bank, armour with every plate whole. */
 function wouldWaste(s: DashboardState, supply: Supply, world: World): boolean {
   if (supply === "energy") return s.energyCells >= world.energyMax;
@@ -1172,15 +1187,16 @@ function applySupply(s: DashboardState, supply: Supply, world: World): Dashboard
 }
 
 /**
- * Collects the supplies in any ruin the robot is standing on. Pickup is automatic, not a verb.
- * Each supply is taken on its own: one that would be wasted stays where it is, so the player can
- * come back for it, while the others in the same ruin are taken.
+ * Collects the supplies and any part in a ruin the robot is standing on. Pickup is automatic, not
+ * a verb. Each supply is taken on its own: one that would be wasted stays where it is, so the
+ * player can come back for it, while the others in the same ruin are taken. A part is always taken.
  */
 function collectDrops(s: DashboardState, world: World): DashboardState {
   let next = s;
   for (const i of s.ruins) {
     const t = world.targets[i];
     if (distanceTo(next.pos, t.col, t.row) > world.pickupRadius) continue;
+    if (t.part !== undefined && holdsPart(next, i, world)) next = { ...next, parts: [...next.parts, t.part] };
     for (const supply of uncollected(next, i, world)) {
       if (wouldWaste(next, supply, world)) continue;
       next = { ...applySupply(next, supply, world), found: [...next.found, { target: i, supply }] };
@@ -1189,11 +1205,11 @@ function collectDrops(s: DashboardState, world: World): DashboardState {
   return next;
 }
 
-/** Every ruin within the scan's reach that still holds a supply, nearest first. */
+/** Every ruin within the scan's reach that still holds a supply or a part, nearest first. */
 function scanFrom(s: DashboardState, world: World): ScanResult {
   const origin = { x: s.pos.x, y: s.pos.y };
   const blips = s.ruins
-    .filter((i) => uncollected(s, i, world).length > 0)
+    .filter((i) => holdsSalvage(s, i, world))
     .map((i) => ({ i, d: distanceTo(origin, world.targets[i].col, world.targets[i].row) }))
     .filter(({ d }) => d <= world.scanRadius)
     .sort((a, b) => a.d - b.d);
@@ -1216,7 +1232,7 @@ export function ringReach(t: number, world: World): number {
  * then fading to nothing over blipSeconds. A ruin emptied since the scan no longer shows.
  */
 export function blipStrength(s: DashboardState, index: number, world: World): number {
-  if (s.scan === null || s.pulseStarted === null || !s.scan.blips.includes(index) || uncollected(s, index, world).length === 0) return 0;
+  if (s.scan === null || s.pulseStarted === null || !s.scan.blips.includes(index) || !holdsSalvage(s, index, world)) return 0;
   const t = world.targets[index];
   const fraction = Math.min(1, distanceTo(s.scan.origin, t.col, t.row) / world.scanRadius);
   // Invert ringReach: the time at which the ring arrives at this distance.
