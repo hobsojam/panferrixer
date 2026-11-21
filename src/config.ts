@@ -112,8 +112,6 @@ export const config = {
   energy: {
     drainPerSecond: 1 / 90, // a cell every 90 seconds of running time: 15 minutes from full, standing still
     perCellWalked: 0.02, // walking the width of the map costs about one and a half cells more
-    dropCells: 2, // an energy supply restores two cells (design-notes 4.6)
-    armourDropPlates: 2, // an armour supply fully mends the two weakest plates, broken ones first (design-notes 4.9)
     // Recharge (#82, design-notes 4.9): standing still and not threatened mends cracks, never broken plates.
     rechargeSecondsPerCrack: 1.5, // quick, so the choice is about cost, not patience: a twice-cracked plate mends in three seconds
     rechargeCellsPerCrack: 0.25, // the cost bites: mending one attack's spread cracks (six) costs a cell and a half
@@ -169,6 +167,9 @@ export const config = {
   dashboard: {
     energyCells: 10, // a full bank
     shieldPlates: 8, // design-notes 4.8: starting armour is eight plates
+    // The missile rack (#86, design-notes 4.4). Placeholders. Every launch uses one, hit, miss or
+    // deflected. Missiles come only from ruins; an empty rack has no floor (author).
+    missileRack: 8, // full and starting: enough for a town's worthwhile targets, not to flatten it
     lowThreshold: 2, // at or below this many cells or plates, the last one flashes and the trace agitates
     tracePoints: 120,
     formName: "PROTOTYPE", // placeholder for the robot form shown in the name bar
@@ -228,13 +229,22 @@ export const config = {
     domesPerTown: 4, // #62: enough for a full garrison of four
     otherBuildingsPerTown: 1, // a mine or a comms centre
     defendersMax: 4, // design-notes 4.4: each network draws 0 to 4 defenders
-    // Supplies (design-notes 4.4): each building kind's chance of holding each supply, rolled
-    // independently. Placeholders. Domes are the haystack, about seven in ten hold nothing; a
-    // mine's ore leans to armour; a comms centre's electronics lean to energy.
+    // Supplies (design-notes 4.4): for each kind, up to `max` units of each supply, each unit there
+    // with `chance`, rolled independently. A unit is one cell, one plate fully mended (the weakest,
+    // broken first) or one missile. Placeholders, tuned by playtest.
+    // Buildings: domes are the enemy's arsenal, where its machines rearm, so they are the main
+    // missile source: opening one usually pays for its missile (#86). Every dome holds at least one,
+    // so a hit on a dome with the last missile never leaves the rack empty. A mine's ore leans to armour;
+    // a comms centre's electronics lean to energy.
+    // Wrecks follow the machine's role: the hunter is aggressive, carrying ammunition and burning
+    // energy on the chase; the defender is defensive, built heavy. The patroller holds nothing: its
+    // guns are not salvage, and it is killed to stop it fetching help, not for what it carries.
     supplyChances: {
-      dome: { energy: 0.15, armour: 0.15 },
-      mine: { energy: 0.3, armour: 0.6 },
-      commsCentre: { energy: 0.7, armour: 0.1 },
+      dome: { energy: { max: 2, chance: 0.15 }, armour: { max: 2, chance: 0.15 }, missiles: { min: 1, max: 3, chance: 0.4 } },
+      mine: { energy: { max: 2, chance: 0.3 }, armour: { max: 2, chance: 0.6 }, missiles: { max: 2, chance: 0.3 } },
+      commsCentre: { energy: { max: 2, chance: 0.7 }, armour: { max: 2, chance: 0.1 }, missiles: { max: 2, chance: 0.1 } },
+      hunter: { energy: { max: 2, chance: 0.4 }, armour: { max: 1, chance: 0.25 }, missiles: { max: 2, chance: 0.6 } },
+      defender: { energy: { max: 1, chance: 0.2 }, armour: { max: 2, chance: 0.55 }, missiles: { max: 1, chance: 0.4 } },
     },
     // Parts (design-notes 4.4): a fixed set placed over the world, not rolled. Placeholders.
     partCount: 6, // the original's six pieces
@@ -268,6 +278,7 @@ export const config = {
     panelSelected: "#ffe066",
     panelDim: "#2a4a9c",
     energy: "#3bff8a", // battery cells: rectangles
+    missile: "#ff9a3b", // the rack: upright pointed rounds
     shield: "#3b9dff", // armour plates: trapezoids, so the two are never confused by colour alone
     alert: "#ff6a3b",
     trace: "#3bff8a",

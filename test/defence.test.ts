@@ -214,11 +214,10 @@ describe("hunters", () => {
     });
   });
 
-  it("a hunter is never shielded and never holds supplies", () => {
+  it("a hunter is never shielded", () => {
     for (const t of world.targets) {
       if (t.kind !== "hunter") continue;
       expect(isShielded(createDashboardState(config), t)).toBe(false);
-      expect(t.supplies).toEqual([]);
     }
   });
 

@@ -17,9 +17,10 @@ export interface LocalMapConfig {
   domesPerTown: number; // at least as many as the most defenders a network can draw (design-notes 4.4)
   otherBuildingsPerTown: number; // mines and comms centres, drawn at random
   defendersMax: number; // each network draws 0 to this many defenders, one per dome at most
-  // Supplies (design-notes 4.4): for each building kind, the chance it holds each supply, rolled
-  // independently, so a ruin may hold nothing, one supply or several. Kinds not listed hold none.
-  supplyChances: Partial<Record<TargetKind, Record<Supply, number>>>;
+  // Supplies (design-notes 4.4): for each kind, building or enemy, how many units of each supply
+  // it can hold at most, and the chance of each unit, rolled independently. A ruin or wreck may
+  // hold nothing, or several units of several supplies. Kinds and supplies not listed hold none.
+  supplyChances: Partial<Record<TargetKind, Partial<Record<Supply, SupplyRoll>>>>;
   // Parts (design-notes 4.4): a fixed set placed over the world, not rolled per building.
   partCount: number; // how many parts the world holds
   partWeights: Partial<Record<TargetKind, number>>; // how likely each building kind is to be chosen; kinds not listed are never chosen
@@ -52,14 +53,24 @@ export interface Town {
 export type TargetKind = "power" | "hunter" | "defender" | "patroller" | "mine" | "commsCentre" | "dome";
 
 /** The supplies a ruin can hold. Parts are not rolled: they are a fixed set, placed (design-notes 4.4). */
-export type Supply = "energy" | "armour";
-export const SUPPLIES: readonly Supply[] = ["energy", "armour"];
+export type Supply = "energy" | "armour" | "missiles";
+export const SUPPLIES: readonly Supply[] = ["energy", "armour", "missiles"];
+
+/**
+ * Up to `max` units of a supply: the first `min` (none if missing) are always there, and each
+ * of the rest is there with `chance`. A unit is one cell, one plate mended or one missile.
+ */
+export interface SupplyRoll {
+  min?: number;
+  max: number;
+  chance: number;
+}
 
 export interface Target {
   col: number;
   row: number;
   kind: TargetKind;
-  supplies: Supply[]; // hidden under the building; found only once it is destroyed
+  supplies: Supply[]; // one entry per unit, hidden in the building or enemy; found only once it is destroyed
   part?: number; // which part (0 to partCount - 1) lies under the building, if any; hidden like supplies
   network: number; // the town (network) it was placed in. Towns can overlap, so position alone does not say
   home?: number; // a defender's dome (target index); its col and row are the free cell beside it, its post
@@ -245,21 +256,29 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
       placed += 1;
     }
   }
-  const withGarrisons = [...placeParts(map, towns, rollSupplies(targets, cfg), cfg), ...placeDefenders(map, towns, targets, cfg)];
-  return [...withGarrisons, ...placePatrollers(map, towns, withGarrisons, cfg)];
+  const withGarrisons = [...placeParts(map, towns, targets, cfg), ...placeDefenders(map, towns, targets, cfg)];
+  return rollSupplies([...withGarrisons, ...placePatrollers(map, towns, withGarrisons, cfg)], cfg);
 }
 
 /**
- * What each building holds (design-notes 4.4): every supply is rolled on its own, from the
- * building kind's chances, so the kind shapes what is likely without making anything certain.
- * The power station holds nothing (it cannot be destroyed) and neither does the hunter. Drawn
- * from its own stream, so changing the chances moves nothing else on the map.
+ * What each building and enemy holds (design-notes 4.4): every unit of every supply is rolled on
+ * its own, from its kind's chances, so the kind shapes what is likely without making anything
+ * certain. A building's ruin and an enemy's wreck are searched alike. Kinds not in the table,
+ * such as the power station (it cannot be destroyed) and the patroller, hold nothing. Drawn from
+ * its own stream, so changing the chances moves nothing else on the map.
  */
 function rollSupplies(targets: readonly Target[], cfg: LocalMapConfig): Target[] {
   const rng = createRng(cfg.worldSeed * 3571 + 9);
   return targets.map((t) => {
-    const chances = cfg.supplyChances[t.kind];
-    return { ...t, supplies: chances === undefined ? [] : SUPPLIES.filter((supply) => rng() < chances[supply]) };
+    const rolls = cfg.supplyChances[t.kind] ?? {};
+    const supplies: Supply[] = [];
+    for (const supply of SUPPLIES) {
+      const roll = rolls[supply];
+      if (roll === undefined) continue;
+      const min = roll.min ?? 0;
+      for (let unit = 0; unit < roll.max; unit++) if (unit < min || rng() < roll.chance) supplies.push(supply);
+    }
+    return { ...t, supplies };
   });
 }
 

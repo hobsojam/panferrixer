@@ -26,10 +26,11 @@ The playable prototype currently includes:
 - **Network shields:** suppressed for a timed window by striking a power station or using
   grid disable.
 - **Persistent destruction:** a successful unshielded strike leaves a ruin on the map.
-- **Salvage:** ruins can hold energy and armour supplies, rolled for each building kind, and
-  one of a fixed set of six parts placed across the world. A visible scan pulse marks ruins
-  that still hold something, and walking close enough collects it. Parts are collectables for
-  now; what they upgrade is still to come.
+- **Salvage:** ruins and the wrecks of hunters and defenders can hold energy, armour and missile
+  supplies, rolled unit by unit for each kind. A fixed set of six parts is also placed in
+  buildings across the world. A visible scan pulse marks ruins and wrecks that still hold
+  something, and walking close enough collects it. Parts are collectables for now; what they
+  upgrade is still to come.
 - **Enemies that move in real time:**
   - Each network's **hunter** guards its town. Coming within sight alerts it. It closes in
     over its own network's ground, fires across the edge when the robot is in range, and
@@ -42,11 +43,13 @@ The playable prototype currently includes:
 - **Incoming attacks:** a first-person turret defence in which the player turns and fires
   at incoming missiles. Each missile that gets through cracks the armour plate facing it.
   Choosing a target or a walk point stops time, so there is always a chance to strike back.
+- **Missile rack:** the robot carries eight missiles, and every launch uses one. Missile
+  supplies in ruins refill it; an empty rack cannot fire.
 - **Energy and armour:** energy drains with time and walking. Standing still out of danger
   mends cracked plates at an energy cost. Running out of energy, or losing every armour
   plate, destroys the robot and starts a new game.
 
-Upgrades, missile restocking, saving, and the complete game objective are still planned
+Upgrades, saving, and the complete game objective are still planned
 rather than playable.
 
 ## Playing
