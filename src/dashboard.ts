@@ -81,12 +81,9 @@ export interface World {
   // The energy and shield economy (#15). Energy is a slow clock: it drains with time and walking.
   energyMax: number; // battery cells when full
   missileRack: number; // missiles the rack holds when full
-  missileDropCount: number; // missiles restored by a missile supply
   hitsPerPlate: number;
   energyDrainPerSecond: number; // cells drained per second of running time, standing or not
   energyPerCellWalked: number; // extra cells drained per map cell walked
-  energyDropCells: number; // cells restored by an energy drop
-  armourDropPlates: number; // plates restored by an armour drop
   rechargeSecondsPerCrack: number; // resting time to mend one crack
   rechargeCellsPerCrack: number; // energy one mended crack costs, drawn as it mends
   rechargeFloorCells: number; // recharge stops at this much energy: the low-power line
@@ -238,12 +235,9 @@ export function worldFor(cfg: Config): World {
       viewRows: cfg.localMap.viewRows,
       energyMax: cfg.dashboard.energyCells,
       missileRack: cfg.dashboard.missileRack,
-      missileDropCount: cfg.dashboard.missileDropCount,
       hitsPerPlate: cfg.dashboard.hitsPerPlate,
       energyDrainPerSecond: cfg.energy.drainPerSecond,
       energyPerCellWalked: cfg.energy.perCellWalked,
-      energyDropCells: cfg.energy.dropCells,
-      armourDropPlates: cfg.energy.armourDropPlates,
       rechargeSecondsPerCrack: cfg.energy.rechargeSecondsPerCrack,
       rechargeCellsPerCrack: cfg.energy.rechargeCellsPerCrack,
       rechargeFloorCells: cfg.dashboard.lowThreshold,
@@ -1162,15 +1156,21 @@ export function isOutOfEnergy(s: DashboardState): boolean {
   return s.energyCells <= 0;
 }
 
-/** One supply collected from one ruin. A ruin can hold several, and each is taken on its own. */
+/** One unit of a supply collected from one ruin or wreck. It can hold several, and each is taken on its own. */
 export interface Salvage {
   target: number;
   supply: Supply;
 }
 
-/** The supplies still lying in a target's ruin: what it held, less what the robot has taken. */
+/** The units still lying in a target's ruin or wreck, one entry each: what it held, less what the robot has taken. */
 export function uncollected(s: DashboardState, index: number, world: World): Supply[] {
-  return world.targets[index].supplies.filter((supply) => !s.found.some((f) => f.target === index && f.supply === supply));
+  const left = [...world.targets[index].supplies];
+  for (const f of s.found) {
+    if (f.target !== index) continue;
+    const at = left.indexOf(f.supply);
+    if (at >= 0) left.splice(at, 1);
+  }
+  return left;
 }
 
 /** Whether a target's ruin still holds a part the robot has not collected. */
@@ -1191,23 +1191,25 @@ function wouldWaste(s: DashboardState, supply: Supply, world: World): boolean {
   return allWhole(s.plates, world.hitsPerPlate);
 }
 
-/** Energy adds cells; missiles fill the rack; armour fully mends the weakest plates, broken ones first. */
+/** One unit: energy adds a cell; a missile goes in the rack; armour fully mends the weakest plate, a broken one first. */
 function applySupply(s: DashboardState, supply: Supply, world: World): DashboardState {
-  if (supply === "energy") return { ...s, energyCells: Math.min(world.energyMax, s.energyCells + world.energyDropCells) };
-  if (supply === "missiles") return { ...s, missiles: Math.min(world.missileRack, s.missiles + world.missileDropCount) };
-  return { ...s, plates: mendWeakest(s.plates, world.armourDropPlates, world.hitsPerPlate) };
+  if (supply === "energy") return { ...s, energyCells: Math.min(world.energyMax, s.energyCells + 1) };
+  if (supply === "missiles") return { ...s, missiles: Math.min(world.missileRack, s.missiles + 1) };
+  return { ...s, plates: mendWeakest(s.plates, 1, world.hitsPerPlate) };
 }
 
 /**
- * Collects the supplies and any part in a ruin the robot is standing on. Pickup is automatic, not
- * a verb. Each supply is taken on its own: one that would be wasted stays where it is, so the
- * player can come back for it, while the others in the same ruin are taken. A part is always taken.
+ * Collects the supplies and any part in a ruin or wreck the robot is standing on. Pickup is
+ * automatic, not a verb. Each unit is taken on its own: one that would be wasted stays where it
+ * is, so the player can come back for it, while the rest are taken. A part is always taken. A
+ * wreck lies where its enemy fell, not at its post.
  */
 function collectDrops(s: DashboardState, world: World): DashboardState {
   let next = s;
   for (const i of s.ruins) {
     const t = world.targets[i];
-    if (distanceTo(next.pos, t.col, t.row) > world.pickupRadius) continue;
+    const at = positionOf(next, i, world);
+    if (distanceTo(next.pos, at.x, at.y) > world.pickupRadius) continue;
     if (t.part !== undefined && holdsPart(next, i, world)) next = { ...next, parts: [...next.parts, t.part] };
     for (const supply of uncollected(next, i, world)) {
       if (wouldWaste(next, supply, world)) continue;
@@ -1222,7 +1224,10 @@ function scanFrom(s: DashboardState, world: World): ScanResult {
   const origin = { x: s.pos.x, y: s.pos.y };
   const blips = s.ruins
     .filter((i) => holdsSalvage(s, i, world))
-    .map((i) => ({ i, d: distanceTo(origin, world.targets[i].col, world.targets[i].row) }))
+    .map((i) => {
+      const at = positionOf(s, i, world);
+      return { i, d: distanceTo(origin, at.x, at.y) };
+    })
     .filter(({ d }) => d <= world.scanRadius)
     .sort((a, b) => a.d - b.d);
   return { origin, blips: blips.map(({ i }) => i), close: blips.length > 0 && blips[0].d <= world.closeRadius };
@@ -1245,8 +1250,8 @@ export function ringReach(t: number, world: World): number {
  */
 export function blipStrength(s: DashboardState, index: number, world: World): number {
   if (s.scan === null || s.pulseStarted === null || !s.scan.blips.includes(index) || !holdsSalvage(s, index, world)) return 0;
-  const t = world.targets[index];
-  const fraction = Math.min(1, distanceTo(s.scan.origin, t.col, t.row) / world.scanRadius);
+  const at = positionOf(s, index, world);
+  const fraction = Math.min(1, distanceTo(s.scan.origin, at.x, at.y) / world.scanRadius);
   // Invert ringReach: the time at which the ring arrives at this distance.
   const arrives = world.scanPulseSeconds * (1 - Math.sqrt(1 - fraction));
   const since = s.time - s.pulseStarted - arrives;
