@@ -39,7 +39,8 @@ The playable prototype currently includes:
   - **Patrollers** walk wide loops between the towns, investigate scans, missile hits and
     power cuts, and run to the nearest armed enemy for help when they see the robot. They are
     lightly armed themselves.
-  - Enemies carry a limited magazine and withdraw to a dome to rearm once it is empty.
+  - Enemies carry a limited magazine and withdraw to an intact dome in their network to rearm
+    once it is empty. With every dome there destroyed, they cannot rearm and fall out of the fight.
 - **Incoming attacks:** a first-person turret defence in which the player turns and fires
   at incoming missiles. Each missile that gets through cracks the armour plate facing it.
   Choosing a target or a walk point stops time, so there is always a chance to strike back.

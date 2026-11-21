@@ -264,7 +264,7 @@ describe("seeing the robot: running for help", () => {
     const s = seen();
     expect(nearestHelper({ ...s, alerted: [DEFENDER] }, PATROLLER, world)).toBe(HUNTER);
     expect(nearestHelper(markRuin(s, DEFENDER), PATROLLER, world)).toBe(HUNTER);
-    expect(nearestHelper({ ...s, rearming: { [DEFENDER]: { x: 0, y: 0, until: null } } }, PATROLLER, world)).toBe(HUNTER);
+    expect(nearestHelper({ ...s, rearming: { [DEFENDER]: { x: 0, y: 0, dome: 0, until: null } } }, PATROLLER, world)).toBe(HUNTER);
     // Another patroller is not armed help.
     const twoPatrollers: World = { ...world, targets: [targets[0], target(6, 5, "patroller", { beat: BEAT })] };
     expect(nearestHelper(s, PATROLLER, twoPatrollers)).toBeNull();

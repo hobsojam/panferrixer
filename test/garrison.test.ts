@@ -15,8 +15,7 @@ import {
   wakeDefender,
   worldFor,
   type DashboardState,
-  type World,
-} from "../src/dashboard";
+  type World, isDisarmed } from "../src/dashboard";
 import { createInitialState } from "../src/flight";
 import { generateWorld, type Target } from "../src/local-map";
 import { OFFSETS } from "../src/route";
@@ -189,11 +188,25 @@ describe("an awake defender guards its dome", () => {
     expect(s.alerted).toEqual([DEFENDER]);
   });
 
-  it("rearms at its own post once its magazine is spent", () => {
+  it("rearms beside the nearest intact dome once its magazine is spent", () => {
     let s = wakeDefender(state({ pos: { x: 10, y: 15 } }), DOME, world);
     for (let i = 0; i < config.dashboard.hunterMagazineAttacks; i++) s = spendAttack(s, DEFENDER, world);
     expect(s.alerted).toEqual([]);
-    expect(s.rearming[DEFENDER]).toMatchObject({ x: 10, y: 11 });
+    expect(s.rearming[DEFENDER]).toMatchObject({ x: 10, y: 11, dome: DOME });
+  });
+
+  it("woken from the rubble of its dome, it rearms at another dome (#102)", () => {
+    let s = wakeDefender(state({ pos: { x: 10, y: 15 }, ruins: [DOME] }), DOME, world);
+    for (let i = 0; i < config.dashboard.hunterMagazineAttacks; i++) s = spendAttack(s, DEFENDER, world);
+    expect(s.rearming[DEFENDER]?.dome).toBe(OTHER_DOME);
+  });
+
+  it("with every dome in its network destroyed, one magazine is all it has (#102)", () => {
+    let s = wakeDefender(state({ pos: { x: 10, y: 15 }, ruins: [DOME, OTHER_DOME] }), DOME, world);
+    for (let i = 0; i < config.dashboard.hunterMagazineAttacks; i++) s = spendAttack(s, DEFENDER, world);
+    expect(s.rearming[DEFENDER]).toBeUndefined();
+    expect(isDisarmed(s, DEFENDER, world)).toBe(true);
+    expect(run({ ...s, pos: { x: 10, y: 13 } }, 2).alerted).toEqual([]);
   });
 });
 
