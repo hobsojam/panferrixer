@@ -31,6 +31,11 @@ The playable prototype currently includes:
 Enemies, combat against the robot, resource depletion, upgrades, saving, and the complete
 game objective are still planned rather than playable.
 
+## Playing
+
+The latest `main` is published to GitHub Pages: <https://hobsojam.github.io/panferrixer/>.
+It is deployed automatically after every merge, once typecheck, tests and the audit pass.
+
 ## Running
 
 ```sh
