@@ -18,7 +18,7 @@ const LOW_DOME = 3;
 const STATION = 4;
 
 function target(col: number, row: number, kind: Target["kind"], network = 0): Target {
-  return { col, row, kind, hasDrop: false, network };
+  return { col, row, kind, supplies: [], network };
 }
 
 /** A hunter at (2, 2), three domes at increasing distances, and the power station. */

@@ -112,8 +112,8 @@ export const config = {
   energy: {
     drainPerSecond: 1 / 90, // a cell every 90 seconds of running time: 15 minutes from full, standing still
     perCellWalked: 0.02, // walking the width of the map costs about one and a half cells more
-    dropCells: 2, // an energy drop restores two cells (design-notes 4.6)
-    armourDropPlates: 2, // an armour drop fully mends the two weakest plates, broken ones first (design-notes 4.9)
+    dropCells: 2, // an energy supply restores two cells (design-notes 4.6)
+    armourDropPlates: 2, // an armour supply fully mends the two weakest plates, broken ones first (design-notes 4.9)
     // Recharge (#82, design-notes 4.9): standing still and not threatened mends cracks, never broken plates.
     rechargeSecondsPerCrack: 1.5, // quick, so the choice is about cost, not patience: a twice-cracked plate mends in three seconds
     rechargeCellsPerCrack: 0.25, // the cost bites: mending one attack's spread cracks (six) costs a cell and a half
@@ -228,7 +228,14 @@ export const config = {
     domesPerTown: 4, // #62: enough for a full garrison of four
     otherBuildingsPerTown: 1, // a mine or a comms centre
     defendersMax: 4, // design-notes 4.4: each network draws 0 to 4 defenders
-    dropChance: 0.5, // placeholder: not every building holds a drop (design-notes 2.6)
+    // Supplies (design-notes 4.4): each building kind's chance of holding each supply, rolled
+    // independently. Placeholders. Domes are the haystack, about seven in ten hold nothing; a
+    // mine's ore leans to armour; a comms centre's electronics lean to energy.
+    supplyChances: {
+      dome: { energy: 0.15, armour: 0.15 },
+      mine: { energy: 0.3, armour: 0.6 },
+      commsCentre: { energy: 0.7, armour: 0.1 },
+    },
     // Patrollers (#66): wide beats between the towns, a few in each segment of the map. Placeholders.
     patrolSegmentsAcross: 3,
     patrolSegmentsDown: 2,

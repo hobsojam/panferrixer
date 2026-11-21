@@ -49,7 +49,7 @@ describe("dashboard sounds", () => {
   it("a scan sound that depends on what was found", () => {
     const near = { ...createDashboardState(config), ruins: [0], pos: { x: 5, y: 5 }, col: 1 };
     const withDrop = { ...near, scan: null };
-    const world2 = { ...world, targets: [{ col: 5, row: 7, kind: "dome" as const, hasDrop: true, network: 0 }] };
+    const world2 = { ...world, targets: [{ col: 5, row: 7, kind: "dome" as const, supplies: ["energy" as const], network: 0 }] };
     const after = stepDashboard({ ...withDrop, ruins: [0] }, ["activate"], DT, { ...world2, range: 2 });
     expect(after.state.scan).toEqual({ origin: { x: 5, y: 5 }, blips: [0], close: true });
     const origin = { x: 5, y: 5 };
@@ -60,7 +60,7 @@ describe("dashboard sounds", () => {
 
   it("a pickup sound when a drop is collected", () => {
     const before = { ...createDashboardState(config), ruins: [0] };
-    const after = { ...before, found: [0] };
+    const after = { ...before, found: [{ target: 0, supply: "energy" as const }] };
     expect(eventsBetween(dash(before), dash(after), config)).toEqual(["pickup"]);
   });
 

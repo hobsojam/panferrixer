@@ -1,5 +1,5 @@
 import type { Config } from "./config";
-import { generateWorld, inTown, isArmedHelper, isEnemyKind, townCentres, walkedCells, type LocalMap, type Target, type Town } from "./local-map";
+import { generateWorld, inTown, isArmedHelper, isEnemyKind, townCentres, walkedCells, type LocalMap, type Supply, type Target, type Town } from "./local-map";
 import { createRng } from "./rng";
 import { allWhole, fullPlates, mendWeakest, plateToMend } from "./armour";
 import { canWalk, reachableGoal, stepToward } from "./enemy-move";
@@ -25,7 +25,7 @@ export const AVAILABLE_VERBS: readonly Verb[] = ["move", "scan", "missile", "gri
  */
 export interface ScanResult {
   origin: Point;
-  blips: number[]; // target indices of ruins with a drop
+  blips: number[]; // target indices of ruins still holding a supply
   close: boolean; // the nearest blip is within the close radius, for the sound
 }
 
@@ -107,7 +107,7 @@ export interface DashboardState {
   mapSelected: boolean; // the arrows have moved from the verb grid onto the map panel
   zoom: "local" | "full"; // the mini map: a window around the robot, or the whole world
   ruins: number[]; // indices of targets destroyed by a missile
-  found: number[]; // indices of ruins whose drop the robot has collected
+  found: Salvage[]; // supplies the robot has collected, each from its ruin
   scan: ScanResult | null; // the last scan, shown until the next one
   // Network power: for each network (town index), the dashboard time at which its shields come back.
   // A network is suppressed while its time is ahead of the clock.
@@ -1148,51 +1148,52 @@ export function isOutOfEnergy(s: DashboardState): boolean {
   return s.energyCells <= 0;
 }
 
-export type DropKind = "energy" | "armour";
-
-/**
- * What a building's drop is (design-notes 4.4): a comms centre's electronics give energy; a mine
- * gives ore, so armour or energy; a dome gives either. Drawn from the target index, so it is
- * fixed for the world and needs no extra draw from the map generator.
- */
-export function dropKind(target: Target, index: number): DropKind {
-  if (target.kind === "commsCentre") return "energy";
-  return createRng(index * 7919 + 13)() < 0.5 ? "energy" : "armour";
+/** One supply collected from one ruin. A ruin can hold several, and each is taken on its own. */
+export interface Salvage {
+  target: number;
+  supply: Supply;
 }
 
-/** Whether a drop would be wasted: energy at a full bank, armour with every plate whole. */
-function wouldWaste(s: DashboardState, kind: DropKind, world: World): boolean {
-  if (kind === "energy") return s.energyCells >= world.energyMax;
+/** The supplies still lying in a target's ruin: what it held, less what the robot has taken. */
+export function uncollected(s: DashboardState, index: number, world: World): Supply[] {
+  return world.targets[index].supplies.filter((supply) => !s.found.some((f) => f.target === index && f.supply === supply));
+}
+
+/** Whether a supply would be wasted: energy at a full bank, armour with every plate whole. */
+function wouldWaste(s: DashboardState, supply: Supply, world: World): boolean {
+  if (supply === "energy") return s.energyCells >= world.energyMax;
   return allWhole(s.plates, world.hitsPerPlate);
 }
 
 /** Energy adds cells; armour fully mends the weakest plates, broken ones first. */
-function applyDrop(s: DashboardState, kind: DropKind, world: World): DashboardState {
-  if (kind === "energy") return { ...s, energyCells: Math.min(world.energyMax, s.energyCells + world.energyDropCells) };
+function applySupply(s: DashboardState, supply: Supply, world: World): DashboardState {
+  if (supply === "energy") return { ...s, energyCells: Math.min(world.energyMax, s.energyCells + world.energyDropCells) };
   return { ...s, plates: mendWeakest(s.plates, world.armourDropPlates, world.hitsPerPlate) };
 }
 
 /**
- * Collects any uncollected drop the robot is standing on. Pickup is automatic, not a verb. A
- * drop that would be wasted stays where it is, so the player can come back for it.
+ * Collects the supplies in any ruin the robot is standing on. Pickup is automatic, not a verb.
+ * Each supply is taken on its own: one that would be wasted stays where it is, so the player can
+ * come back for it, while the others in the same ruin are taken.
  */
 function collectDrops(s: DashboardState, world: World): DashboardState {
   let next = s;
   for (const i of s.ruins) {
     const t = world.targets[i];
-    if (!t.hasDrop || next.found.includes(i) || distanceTo(next.pos, t.col, t.row) > world.pickupRadius) continue;
-    const kind = dropKind(t, i);
-    if (wouldWaste(next, kind, world)) continue;
-    next = { ...applyDrop(next, kind, world), found: [...next.found, i] };
+    if (distanceTo(next.pos, t.col, t.row) > world.pickupRadius) continue;
+    for (const supply of uncollected(next, i, world)) {
+      if (wouldWaste(next, supply, world)) continue;
+      next = { ...applySupply(next, supply, world), found: [...next.found, { target: i, supply }] };
+    }
   }
   return next;
 }
 
-/** Every uncollected drop in a ruin within the scan's reach, nearest first. */
+/** Every ruin within the scan's reach that still holds a supply, nearest first. */
 function scanFrom(s: DashboardState, world: World): ScanResult {
   const origin = { x: s.pos.x, y: s.pos.y };
   const blips = s.ruins
-    .filter((i) => world.targets[i].hasDrop && !s.found.includes(i))
+    .filter((i) => uncollected(s, i, world).length > 0)
     .map((i) => ({ i, d: distanceTo(origin, world.targets[i].col, world.targets[i].row) }))
     .filter(({ d }) => d <= world.scanRadius)
     .sort((a, b) => a.d - b.d);
@@ -1212,10 +1213,10 @@ export function ringReach(t: number, world: World): number {
 
 /**
  * How brightly a ruin's blip shows now, from 0 (not shown) to 1: dark until the ring reaches it,
- * then fading to nothing over blipSeconds. A drop collected since the scan no longer shows.
+ * then fading to nothing over blipSeconds. A ruin emptied since the scan no longer shows.
  */
 export function blipStrength(s: DashboardState, index: number, world: World): number {
-  if (s.scan === null || s.pulseStarted === null || !s.scan.blips.includes(index) || s.found.includes(index)) return 0;
+  if (s.scan === null || s.pulseStarted === null || !s.scan.blips.includes(index) || uncollected(s, index, world).length === 0) return 0;
   const t = world.targets[index];
   const fraction = Math.min(1, distanceTo(s.scan.origin, t.col, t.row) / world.scanRadius);
   // Invert ringReach: the time at which the ring arrives at this distance.

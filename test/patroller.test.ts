@@ -31,7 +31,7 @@ const FAR = { x: 39, y: 0 }; // a robot nobody can see
 const flat = mapOf(Array(21).fill("1".repeat(40)));
 
 function target(col: number, row: number, kind: Target["kind"], extra: Partial<Target> = {}): Target {
-  return { col, row, kind, hasDrop: false, network: 0, ...extra };
+  return { col, row, kind, supplies: [], network: 0, ...extra };
 }
 
 const BEAT = [

@@ -75,7 +75,7 @@ describe("a hunter guards its network (#91)", () => {
     towns: [{ x: 10, y: 10 }],
     townRadiusCols: 7,
     townRadiusRows: 4,
-    targets: [{ col: 10, row: 10, kind: "hunter", hasDrop: false, network: 0 }],
+    targets: [{ col: 10, row: 10, kind: "hunter", supplies: [], network: 0 }],
   };
   const inArea = (p: { x: number; y: number }) => ((Math.round(p.x) - 10) / 7) ** 2 + ((Math.round(p.y) - 10) / 4) ** 2 <= 1;
   const runIn = (s: DashboardState, seconds: number) => {
@@ -126,12 +126,12 @@ describe("a hunter guards its network (#91)", () => {
 describe("hunters and buildings (design-notes 4.7)", () => {
   // A hunter at (2, 1) and a solid wall of domes down column 4: the robot could never cross it.
   const rows = 3;
-  const wall = Array.from({ length: rows }, (_, row) => ({ col: 4, row, kind: "dome" as const, hasDrop: false, network: 0 }));
+  const wall = Array.from({ length: rows }, (_, row) => ({ col: 4, row, kind: "dome" as const, supplies: [], network: 0 }));
   const walled: World = {
     ...world,
     map: mapOf(Array(rows).fill("1".repeat(15))),
     towns: [],
-    targets: [{ col: 2, row: 1, kind: "hunter", hasDrop: false, network: 0 }, ...wall],
+    targets: [{ col: 2, row: 1, kind: "hunter", supplies: [], network: 0 }, ...wall],
   };
   const chasing: DashboardState = { ...createDashboardState(config), pos: { x: 12, y: 1 }, alerted: [0] };
 

@@ -28,7 +28,7 @@ function onHighGround(map: LocalMap, p: { x: number; y: number }): boolean {
 }
 
 function hunterAt(col: number, row: number): Target {
-  return { col, row, kind: "hunter", hasDrop: false, network: 0 };
+  return { col, row, kind: "hunter", supplies: [], network: 0 };
 }
 
 function worldOn(map: LocalMap, targets: Target[]): World {
@@ -118,8 +118,8 @@ describe("hunters and high ground", () => {
   });
 
   it("rearms at a dome it can walk to, passing over a nearer one cut off by high ground", () => {
-    const nearDome: Target = { col: 9, row: 1, kind: "dome", hasDrop: false, network: 0 };
-    const farDome: Target = { col: 1, row: 5, kind: "dome", hasDrop: false, network: 0 };
+    const nearDome: Target = { col: 9, row: 1, kind: "dome", supplies: [], network: 0 };
+    const farDome: Target = { col: 1, row: 5, kind: "dome", supplies: [], network: 0 };
     const world = worldOn(sealed, [hunterAt(5, 1), nearDome, farDome]);
     const s: DashboardState = { ...createDashboardState(config), alerted: [0], attacksUsed: { 0: config.dashboard.hunterMagazineAttacks - 1 } };
     const spent = spendAttack(s, 0, world);
@@ -128,7 +128,7 @@ describe("hunters and high ground", () => {
   });
 
   it("rearms at its post when every dome is cut off", () => {
-    const dome: Target = { col: 9, row: 1, kind: "dome", hasDrop: false, network: 0 };
+    const dome: Target = { col: 9, row: 1, kind: "dome", supplies: [], network: 0 };
     const world = worldOn(sealed, [hunterAt(5, 1), dome]);
     const s: DashboardState = { ...createDashboardState(config), alerted: [0], attacksUsed: { 0: config.dashboard.hunterMagazineAttacks - 1 } };
     expect(spendAttack(s, 0, world).rearming[0]).toMatchObject({ x: 5, y: 1 });

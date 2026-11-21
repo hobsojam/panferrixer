@@ -35,7 +35,7 @@ const OTHER_DOME = 1;
 const DEFENDER = 2;
 
 function target(col: number, row: number, kind: Target["kind"], network = 0): Target {
-  return { col, row, kind, hasDrop: false, network };
+  return { col, row, kind, supplies: [], network };
 }
 
 /** Two domes; the first holds a defender whose post is the cell below it. */
