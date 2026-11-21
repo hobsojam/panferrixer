@@ -40,6 +40,7 @@ export function renderDashboard(ctx: CanvasRenderingContext2D, state: DashboardS
   drawGauge(ctx, "ENERGY", energyUnits(state.energyCells, cfg.dashboard.energyCells, cfg), 330, cfg, "cell", state.time);
   const rest = isResting(state, world);
   drawGauge(ctx, "SHIELDS", plateUnits(state.plates, rest ? state.mendProgress : null, cfg), 384, cfg, "plate", state.time);
+  drawGauge(ctx, "MISSILES", rackUnits(state.missiles, cfg), 438, cfg, "round", state.time);
   if (isLow(state.energyCells, cfg)) drawLowPower(ctx, state.time, cfg);
   else if (rest) drawText(ctx, "RECHARGING", cfg.canvas.width / 2, 316, 15, cfg.colors.shield, 1, "monospace");
 
@@ -180,20 +181,21 @@ function drawSelectedReadout(ctx: CanvasRenderingContext2D, state: DashboardStat
     return;
   }
   const available = AVAILABLE_VERBS.includes(verb);
+  const empty = verb === "missile" && state.missiles <= 0;
   drawText(ctx, "SELECTED", x + 14, PANEL_TOP + 158, 12, c.text, 0.7, "monospace", "left");
   drawText(ctx, VERB_LABELS[verb], x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
   drawText(
     ctx,
-    available ? "READY" : "NOT YET BUILT",
+    empty ? "RACK EMPTY" : !available ? "NOT YET BUILT" : verb === "missile" ? `READY  ${state.missiles} IN RACK` : "READY",
     x + 14,
     PANEL_TOP + 204,
     13,
-    available ? c.energy : c.panelDim,
+    available && !empty ? c.energy : c.panelDim,
     1,
     "monospace",
     "left"
   );
-  if (available) {
+  if (available && !empty) {
     const prompt = verb === "move" ? "SPACE TO CHOOSE A POINT" : "SPACE TO FIRE";
     drawText(ctx, prompt, x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
   }
@@ -601,10 +603,17 @@ function plateUnits(plates: readonly number[], mending: number | null, cfg: Conf
   return plates.map((p, i) => ({ part: p > 0 ? 1 : 0, cracks: cracksOn(p, hpp), flash: low && p > 0, healing: i === mended ? (mending ?? 0) : undefined }));
 }
 
+/** The rack as upright rounds, one per missile; empty slots show dim. Nothing flashes: an empty rack is not a danger in itself. */
+function rackUnits(missiles: number, cfg: Config): GaugeUnit[] {
+  return Array.from({ length: cfg.dashboard.missileRack }, (_, i) => ({ part: i < missiles ? 1 : 0, cracks: 0, flash: false }));
+}
+
+type GaugeShape = "cell" | "plate" | "round";
+
 /** A row of gauge units with its label. */
-function drawGauge(ctx: CanvasRenderingContext2D, label: string, units: readonly GaugeUnit[], y: number, cfg: Config, shape: "cell" | "plate", time: number): void {
+function drawGauge(ctx: CanvasRenderingContext2D, label: string, units: readonly GaugeUnit[], y: number, cfg: Config, shape: GaugeShape, time: number): void {
   const c = cfg.colors;
-  const color = shape === "cell" ? c.energy : c.shield;
+  const color = shape === "cell" ? c.energy : shape === "plate" ? c.shield : c.missile;
   const left = 150;
   const right = cfg.canvas.width - 20;
   const gap = 8;
@@ -637,13 +646,32 @@ function drawGauge(ctx: CanvasRenderingContext2D, label: string, units: readonly
   ctx.globalAlpha = 1;
 }
 
-function traceUnit(ctx: CanvasRenderingContext2D, shape: "cell" | "plate", x: number, y: number, w: number, h: number): void {
+function traceUnit(ctx: CanvasRenderingContext2D, shape: GaugeShape, x: number, y: number, w: number, h: number): void {
   if (shape === "cell") {
     ctx.beginPath();
     ctx.rect(x, y, w, h);
-  } else {
+  } else if (shape === "plate") {
     tracePlate(ctx, x, y, w, h);
+  } else {
+    traceRound(ctx, x, y, w, h);
   }
+}
+
+/** A missile standing upright in its slot: a slim body with a pointed nose and small fins, so it reads apart from cells and plates. */
+function traceRound(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+  const cx = x + w / 2;
+  const half = Math.min(w, h) * 0.18;
+  const nose = y + h * 0.3;
+  const fins = y + h * 0.75;
+  ctx.beginPath();
+  ctx.moveTo(cx, y);
+  ctx.lineTo(cx + half, nose);
+  ctx.lineTo(cx + half, fins);
+  ctx.lineTo(cx + half * 2, y + h);
+  ctx.lineTo(cx - half * 2, y + h);
+  ctx.lineTo(cx - half, fins);
+  ctx.lineTo(cx - half, nose);
+  ctx.closePath();
 }
 
 /**
