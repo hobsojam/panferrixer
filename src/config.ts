@@ -169,6 +169,10 @@ export const config = {
   dashboard: {
     energyCells: 10, // a full bank
     shieldPlates: 8, // design-notes 4.8: starting armour is eight plates
+    // The missile rack (#86, design-notes 4.4). Placeholders. Every launch uses one, hit, miss or
+    // deflected. Missiles come only from ruins; an empty rack has no floor (author).
+    missileRack: 8, // full and starting: enough for a town's worthwhile targets, not to flatten it
+    missileDropCount: 2, // missiles in one missile supply
     lowThreshold: 2, // at or below this many cells or plates, the last one flashes and the trace agitates
     tracePoints: 120,
     formName: "PROTOTYPE", // placeholder for the robot form shown in the name bar
@@ -232,9 +236,9 @@ export const config = {
     // independently. Placeholders. Domes are the haystack, about seven in ten hold nothing; a
     // mine's ore leans to armour; a comms centre's electronics lean to energy.
     supplyChances: {
-      dome: { energy: 0.15, armour: 0.15 },
-      mine: { energy: 0.3, armour: 0.6 },
-      commsCentre: { energy: 0.7, armour: 0.1 },
+      dome: { energy: 0.15, armour: 0.15, missiles: 0.2 },
+      mine: { energy: 0.3, armour: 0.6, missiles: 0.3 },
+      commsCentre: { energy: 0.7, armour: 0.1, missiles: 0.1 },
     },
     // Parts (design-notes 4.4): a fixed set placed over the world, not rolled. Placeholders.
     partCount: 6, // the original's six pieces
@@ -268,6 +272,7 @@ export const config = {
     panelSelected: "#ffe066",
     panelDim: "#2a4a9c",
     energy: "#3bff8a", // battery cells: rectangles
+    missile: "#ff9a3b", // the rack: upright pointed rounds
     shield: "#3b9dff", // armour plates: trapezoids, so the two are never confused by colour alone
     alert: "#ff6a3b",
     trace: "#3bff8a",

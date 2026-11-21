@@ -80,6 +80,8 @@ export interface World {
   viewRows: number;
   // The energy and shield economy (#15). Energy is a slow clock: it drains with time and walking.
   energyMax: number; // battery cells when full
+  missileRack: number; // missiles the rack holds when full
+  missileDropCount: number; // missiles restored by a missile supply
   hitsPerPlate: number;
   energyDrainPerSecond: number; // cells drained per second of running time, standing or not
   energyPerCellWalked: number; // extra cells drained per map cell walked
@@ -110,6 +112,7 @@ export interface DashboardState {
   ruins: number[]; // indices of targets destroyed by a missile
   found: Salvage[]; // supplies the robot has collected, each from its ruin
   parts: number[]; // the parts the robot has collected, in the order found
+  missiles: number; // in the rack; one is used by every launch
   scan: ScanResult | null; // the last scan, shown until the next one
   // Network power: for each network (town index), the dashboard time at which its shields come back.
   // A network is suppressed while its time is ahead of the clock.
@@ -234,6 +237,8 @@ export function worldFor(cfg: Config): World {
       viewCols: cfg.localMap.viewCols,
       viewRows: cfg.localMap.viewRows,
       energyMax: cfg.dashboard.energyCells,
+      missileRack: cfg.dashboard.missileRack,
+      missileDropCount: cfg.dashboard.missileDropCount,
       hitsPerPlate: cfg.dashboard.hitsPerPlate,
       energyDrainPerSecond: cfg.energy.drainPerSecond,
       energyPerCellWalked: cfg.energy.perCellWalked,
@@ -253,6 +258,7 @@ export function createDashboardState(cfg: Config): DashboardState {
     row: 0,
     col: 0,
     energyCells: cfg.dashboard.energyCells,
+    missiles: cfg.dashboard.missileRack,
     plates: fullPlates(cfg.dashboard.shieldPlates, cfg.dashboard.hitsPerPlate),
     mendProgress: 0,
     time: 0,
@@ -1021,8 +1027,10 @@ export function stepDashboard(state: DashboardState, actions: readonly Action[],
           world
         );
         s = { ...opened, mode: "browse", target: null, gridReadyAt: s.time + world.gridDisableCooldownSeconds };
-      } else if (s.target !== null) {
+      } else if (s.target !== null && s.missiles > 0) {
+        // Every launch uses a missile from the rack, whatever the flight's outcome.
         fire = world.targets[s.target];
+        s = { ...s, missiles: s.missiles - 1 };
       }
     } else {
       s = moveCross(s, action, world);
@@ -1064,6 +1072,8 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
   if (action === "activate") {
     const verb = selectedVerb(s);
     if (verb === "missile") {
+      // An empty rack cannot fire, so the targeting cross does not open (design-notes 4.4).
+      if (s.missiles <= 0) return s;
       // Equipment only reaches what the local map shows, so using it pulls the map back to local.
       const local: DashboardState = { ...s, zoom: "local" };
       const cross = { col: Math.round(s.pos.x), row: Math.round(s.pos.y) };
@@ -1177,12 +1187,14 @@ function holdsSalvage(s: DashboardState, index: number, world: World): boolean {
 /** Whether a supply would be wasted: energy at a full bank, armour with every plate whole. */
 function wouldWaste(s: DashboardState, supply: Supply, world: World): boolean {
   if (supply === "energy") return s.energyCells >= world.energyMax;
+  if (supply === "missiles") return s.missiles >= world.missileRack;
   return allWhole(s.plates, world.hitsPerPlate);
 }
 
-/** Energy adds cells; armour fully mends the weakest plates, broken ones first. */
+/** Energy adds cells; missiles fill the rack; armour fully mends the weakest plates, broken ones first. */
 function applySupply(s: DashboardState, supply: Supply, world: World): DashboardState {
   if (supply === "energy") return { ...s, energyCells: Math.min(world.energyMax, s.energyCells + world.energyDropCells) };
+  if (supply === "missiles") return { ...s, missiles: Math.min(world.missileRack, s.missiles + world.missileDropCount) };
   return { ...s, plates: mendWeakest(s.plates, world.armourDropPlates, world.hitsPerPlate) };
 }
 

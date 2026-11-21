@@ -52,8 +52,8 @@ export interface Town {
 export type TargetKind = "power" | "hunter" | "defender" | "patroller" | "mine" | "commsCentre" | "dome";
 
 /** The supplies a ruin can hold. Parts are not rolled: they are a fixed set, placed (design-notes 4.4). */
-export type Supply = "energy" | "armour";
-export const SUPPLIES: readonly Supply[] = ["energy", "armour"];
+export type Supply = "energy" | "armour" | "missiles";
+export const SUPPLIES: readonly Supply[] = ["energy", "armour", "missiles"];
 
 export interface Target {
   col: number;
