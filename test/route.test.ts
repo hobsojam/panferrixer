@@ -108,6 +108,6 @@ describe("the world leaves a passable path", () => {
   it("every network still gets all its buildings and its hunter", () => {
     const { towns, targets } = generateWorld(config.localMap);
     const perTown = 2 + config.localMap.domesPerTown + config.localMap.otherBuildingsPerTown;
-    expect(targets.filter((t) => t.kind !== "defender" && t.kind !== "patroller").length).toBe(towns.length * perTown);
+    expect(targets.filter((t) => t.kind !== "defender" && t.kind !== "patroller" && t.kind !== "hauler").length).toBe(towns.length * perTown);
   });
 });

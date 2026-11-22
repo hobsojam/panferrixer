@@ -240,6 +240,14 @@ export const config = {
     patrollerLeashCells: 15, // once fighting, how far it follows the robot from where it started
     patrollerMagazineAttacks: 2, // attacks before it withdraws to rearm
     patrollerVolleys: 1, // lightly armed: one volley per attack, against a hunter's three
+    // Haulers (#67, design-notes 4.10): defensive. They keep to their route, and flee a threat,
+    // taking their cargo with them, so chasing one is a choice. Unarmed for now. Placeholders.
+    haulerSpeed: 1.5, // cells per second on its route: laden
+    haulerFleeSpeed: 2.5, // cells per second while fleeing: slower than the robot's walk, so it can be run down
+    haulerSightCells: 5, // like every enemy, it is always looking
+    haulerHearingCells: 15, // a missile hit this close scares it, as it draws a patroller
+    haulerFleeCells: 10, // how far, in steps over the terrain, it looks for somewhere away from the threat
+    haulerFleeSeconds: 8, // how long it keeps away after it last saw or heard the threat, before going back to its route
     startClearanceCells: 2, // the robot starts at least this far outside a town and beyond any hunter's sight
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
@@ -274,6 +282,9 @@ export const config = {
       commsCentre: { energy: { max: 3, chance: 0.7 }, armour: { max: 2, chance: 0.1 }, missiles: { max: 2, chance: 0.1 } },
       hunter: { energy: { max: 2, chance: 0.5 }, armour: { max: 1, chance: 0.25 }, missiles: { max: 2, chance: 0.6 } },
       defender: { energy: { max: 1, chance: 0.2 }, armour: { max: 2, chance: 0.55 }, missiles: { max: 1, chance: 0.4 } },
+      // The hauler's cargo (#67, design-notes 4.4): power pods are energy, raw material mends armour.
+      // Always worth something: it is the reason to run one down. It carries no weapons, so no missiles.
+      hauler: { energy: { min: 1, max: 3, chance: 0.5 }, armour: { max: 2, chance: 0.4 } },
     },
     // Parts (design-notes 4.4): a fixed set placed over the world, not rolled. Placeholders.
     partCount: 6, // placeholder: one per upgrade, to be decided
@@ -297,6 +308,7 @@ export const config = {
     patrolBeatPoints: 4, // waypoints on each patroller's loop
     patrolBeatSpacing: 8, // waypoints on one loop are at least this many cells apart
     startTown: START_NODE, // patrollers keep clear of the town where the robot begins
+    haulersPerTown: 1, // #67: placeholder
     patrolStartClearCells: 16, // no beat comes this close to that town's centre, so the game cannot open with a patroller walking past
     viewCols: 25, // the mini map's local window, in cells
     viewRows: 11,
