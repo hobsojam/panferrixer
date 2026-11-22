@@ -39,8 +39,16 @@ export function render(
     drawMountains(ctx, state, cfg, horizonY);
   }
 
-  if (state.phase === "terminal" || state.phase === "hit") {
+  if (state.phase === "terminal" || state.phase === "hit" || state.phase === "shotDown") {
     drawTarget(ctx, state, cfg, horizonY, targetKind, shielded);
+  }
+
+  if (state.phase === "terminal") {
+    drawPointDefence(ctx, state, cfg, horizonY);
+  }
+
+  if (state.phase === "shotDown") {
+    drawCrash(ctx, state, cfg);
   }
 
   if (state.phase === "hit") {
@@ -57,6 +65,10 @@ export function render(
     drawText(ctx, "MISSED", w / 2, h / 2, 48, cfg.colors.text, Math.min(1, state.resultElapsed * 2));
   }
 
+  if (state.phase === "shotDown") {
+    drawText(ctx, "SHOT DOWN", w / 2, h / 2, 48, cfg.colors.tracer, Math.min(1, state.resultElapsed * 2));
+  }
+
   if (state.phase === "hit" && shielded) {
     drawText(ctx, "DEFLECTED", w / 2, h / 2, 48, cfg.colors.shield, Math.min(1, state.resultElapsed * 2));
   }
@@ -64,7 +76,7 @@ export function render(
   drawMarker(ctx, state, cfg);
   drawFrame(ctx, cfg);
 
-  if (state.phase === "hit" || state.phase === "crash" || state.phase === "miss") {
+  if (state.phase === "hit" || state.phase === "crash" || state.phase === "miss" || state.phase === "shotDown") {
     drawText(ctx, "PRESS SPACE TO RETURN TO DASHBOARD", w / 2, h - 36, 18, cfg.colors.text, 1);
   }
 }
@@ -231,6 +243,68 @@ function drawHitBurst(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Co
 }
 
 /** A missile crash into terrain: a blast with dust, centred on the view. */
+/**
+ * Point defence (design-notes 4.11): a flash at the target's muzzle while a burst is announced,
+ * then each round as a tracer streak rushing out of the target toward the line it was aimed at.
+ * Drawn in the same lateral scale as the target, so a round aimed at the missile ends at the
+ * centre of the view, and one aimed elsewhere passes off to the side.
+ */
+function drawPointDefence(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config, horizonY: number): void {
+  const { width: w } = cfg.canvas;
+  const { centerX, centerY, size } = targetAnchor(state, cfg, horizonY);
+  const muzzle = { x: centerX, y: centerY - size * 0.15 };
+  const color = cfg.colors.tracer;
+
+  for (const b of state.bursts) {
+    const since = state.elapsed - b.warnedAt;
+    if (since < 0 || since > cfg.pointDefence.warningSeconds) continue;
+    const pulse = 0.5 + 0.5 * Math.sin(since * 60);
+    drawGlow(ctx, color, 12, () => {
+      ctx.globalAlpha = 0.5 + 0.5 * pulse;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      const r = 10 + size * 0.12;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + since * 4;
+        ctx.moveTo(muzzle.x + Math.cos(a) * r * 0.3, muzzle.y + Math.sin(a) * r * 0.3);
+        ctx.lineTo(muzzle.x + Math.cos(a) * r, muzzle.y + Math.sin(a) * r);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  // Where a round ends up as it reaches the missile: the centre of the view if it was aimed at the
+  // missile, off to the side by however far it was aimed away.
+  const nearY = horizonY + 110; // a little below the line of flight, so incoming fire visibly rushes out at the view
+  const at = (r: (typeof state.rounds)[number], p: number) => {
+    const nearX = w / 2 + (r.x - state.x) * (w / 2) * 0.9;
+    const e = p ** 2.5; // creeping far off, rushing in close, as perspective would
+    return { x: muzzle.x + (nearX - muzzle.x) * e, y: muzzle.y + (nearY - muzzle.y) * e };
+  };
+  for (const r of state.rounds) {
+    const start = state.totalDistance - r.firedDepth;
+    const p = clamp(1 - (r.depth - state.depth) / Math.max(1, start), 0, 1);
+    const head = at(r, p);
+    const tail = at(r, Math.max(0, p - 0.12));
+    drawGlow(ctx, color, 10, () => {
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 1.5 + 8 * p * p;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(tail.x, tail.y);
+      ctx.lineTo(head.x, head.y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(head.x, head.y, 2 + 22 * p ** 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineCap = "butt";
+    });
+  }
+}
+
 function drawCrash(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config): void {
   const { width: w, height: h } = cfg.canvas;
   const centerX = w / 2;

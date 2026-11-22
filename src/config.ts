@@ -157,9 +157,24 @@ export const config = {
     approachCorridorHalfWidth: 0.25, // clear lane straight to the target through the surrounding mountains
   },
 
+  // Point defence (design-notes 4.11): a defended target's turret fires aimed bursts at the missile
+  // in the terminal phase. Never a dice roll: every burst is announced and can be dodged. Placeholders.
+  pointDefence: {
+    firstBurstSeconds: 0.5, // after the terminal phase starts, before the first warning
+    burstIntervalSeconds: 1.1, // between one burst's warning and the next
+    warningSeconds: 0.35, // the muzzle flash: the aim is fixed here, so moving after it dodges
+    roundsPerBurst: 4,
+    roundSpacingSeconds: 0.07,
+    roundSpeed: 250, // world units per second toward the missile, on top of the missile's own speed
+    hitHalfWidth: 0.09, // a round this close laterally as it passes destroys the missile
+    leadSeconds: 0.25, // the aim leads a steadily drifting missile by this much of its lateral speed
+    ceaseDistance: 160, // no new warning this close to the target, so the last burst can still be dodged
+  },
+
   feelTestToggles: {
     distanceIndicatorMode: "none" as DistanceIndicatorMode,
     altitudeBandsEnabled: false,
+    pointDefenceEverywhere: false, // every target is defended, to tune the feel before escalation decides who is
   },
 
   // The dashboard between missiles (design-notes 4.6). Counts are starting and full values;
@@ -279,6 +294,7 @@ export const config = {
     panelDim: "#2a4a9c",
     energy: "#3bff8a", // battery cells: rectangles
     missile: "#ff9a3b", // the rack: upright pointed rounds
+    tracer: "#ff7b54", // point-defence fire: apart from the yellow target art and the blue terrain
     shield: "#3b9dff", // armour plates: trapezoids, so the two are never confused by colour alone
     alert: "#ff6a3b",
     trace: "#3bff8a",

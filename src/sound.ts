@@ -22,6 +22,7 @@ export type SoundEvent =
   | "deflect"
   | "crash"
   | "miss"
+  | "pointDefence"
   | "incoming"
   | "gun"
   | "missileDown"
@@ -80,6 +81,8 @@ function defenceEvents(prev: DefenceState, next: DefenceState): SoundEvent[] {
 }
 
 function flightEvents(prev: FlightState, next: FlightState, shielded: boolean): SoundEvent[] {
+  // A point-defence burst is announced: its warning moves the next one on.
+  if (prev.nextBurstAt !== null && next.nextBurstAt !== prev.nextBurstAt && next.phase === "terminal") return ["pointDefence"];
   if (prev.phase === next.phase) return [];
   switch (next.phase) {
     case "terminal":
@@ -90,6 +93,8 @@ function flightEvents(prev: FlightState, next: FlightState, shielded: boolean): 
       return ["crash"];
     case "miss":
       return ["miss"];
+    case "shotDown":
+      return ["crash"];
     default:
       return [];
   }
@@ -269,6 +274,10 @@ const PLAY: Record<SoundEvent, Player> = {
     noise(c, t + 0.4, 0.08, 0.2, "highpass", 3000, 1500);
     noise(c, t + 1.1, 0.06, 0.2, "highpass", 3000, 1500);
     noise(c, t + 1.7, 0.12, 0.25, "highpass", 2500, 800);
+  },
+  // A point-defence burst: a short dry rattle, the rounds leaving the muzzle after the flash.
+  pointDefence: (c, t) => {
+    for (let i = 0; i < 4; i++) noise(c, t + 0.35 + i * 0.07, 0.035, 0.45, "bandpass", 2600, 1800);
   },
   miss: (c, t) => {
     noise(c, t, 0.7, 0.25, "highpass", 2000, 400);

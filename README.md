@@ -22,7 +22,9 @@ The playable prototype currently includes:
   chosen reachable cell. Intact buildings block the way; ruins do not.
 - **Missile strikes:** targeting nearby buildings and enemies, then a forward-looking
   wireframe flight over generated terrain, with terminal target art, collisions, misses and
-  explosions. A nearer target is a shorter flight.
+  explosions. A nearer target is a shorter flight. A defended target fires aimed bursts at the
+  missile in the last seconds, which the player dodges; for now only a feel-test toggle in
+  `src/config.ts` turns this on.
 - **Network shields:** suppressed for a timed window by striking a power station or using
   grid disable.
 - **Persistent destruction:** a successful unshielded strike leaves a ruin on the map.
@@ -80,7 +82,7 @@ the turret.
 | Scan | Select **SCAN**, then press Space or Enter. The result reports the nearest eligible drop when it is in range. |
 | Grid disable | Select **GRID DISABLE**, choose a power station with the arrow keys, then press Space or Enter to suppress that station's network shields. Escape cancels. |
 | Missile targeting | Use the arrow keys to position the cross near a building. Space or Enter fires at the selected target; Escape cancels. |
-| Missile flight | Hold Left or Right to steer. The missile flies forward at a fixed speed and altitude. |
+| Missile flight | Hold Left or Right to steer. The missile flies forward at a fixed speed and altitude. Against a defended target, a flash on the target means a burst is coming at you: sidestep it, then come back onto the target. |
 | Flight result | Press Space or Enter to return to the dashboard. |
 | Incoming attack | Arrow keys turn the turret; hold Space to fire. Or click to capture the mouse, then move it to aim and hold the left button to fire; Escape releases it. The dashboard returns by itself when the attack is over. |
 | Robot destroyed | Once the wreck has shown, press Space or Enter to start a new game. |
