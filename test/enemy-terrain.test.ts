@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
-import { createDashboardState, moveHunters, positionOf, spendAttack, worldFor, type DashboardState, type World } from "../src/dashboard";
+import { createDashboardState, moveHunters, positionOf, spendAttack, worldFor, type DashboardState, type World, isDisarmed } from "../src/dashboard";
 import { reachableGoal, stepToward } from "../src/enemy-move";
 import { generateWorld, type LocalMap, type Target } from "../src/local-map";
 import { cellKey, reachableFrom } from "../src/route";
@@ -127,11 +127,13 @@ describe("hunters and high ground", () => {
     expect(Math.abs(spot.x - farDome.col) + Math.abs(spot.y - farDome.row)).toBe(1);
   });
 
-  it("rearms at its post when every dome is cut off", () => {
+  it("cannot rearm when every dome is cut off (#102)", () => {
     const dome: Target = { col: 9, row: 1, kind: "dome", supplies: [], network: 0 };
     const world = worldOn(sealed, [hunterAt(5, 1), dome]);
     const s: DashboardState = { ...createDashboardState(config), alerted: [0], attacksUsed: { 0: config.dashboard.hunterMagazineAttacks - 1 } };
-    expect(spendAttack(s, 0, world).rearming[0]).toMatchObject({ x: 5, y: 1 });
+    const spent = spendAttack(s, 0, world);
+    expect(spent.rearming[0]).toBeUndefined();
+    expect(isDisarmed(spent, 0, world)).toBe(true);
   });
 });
 

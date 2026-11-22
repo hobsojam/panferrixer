@@ -167,10 +167,11 @@ export interface HelpCall {
   time: number;
 }
 
-/** A hunter sent to rearm: it walks there, stays a while, then goes home. */
+/** An enemy sent to rearm: it walks to the free cell beside a dome, stays a while, then goes home. */
 export interface Errand {
   x: number;
   y: number;
+  dome: number; // the dome (target index) it rearms at; if it is destroyed first, the enemy chooses again
   until: number | null;
 }
 
@@ -484,8 +485,8 @@ export function routeTo(s: DashboardState, cell: Cross, world: World): Point[] |
  * first attack, and drops any patrol it was on.
  */
 export function alertTo(s: DashboardState, indices: readonly number[], world: World): DashboardState {
-  // A hunter withdrawing to rearm has nothing to attack with, and does not turn back.
-  const fresh = indices.filter((i) => !s.alerted.includes(i) && !s.rearming[i]);
+  // A hunter withdrawing to rearm, or with nowhere left to rearm (#102), has nothing to attack with.
+  const fresh = indices.filter((i) => !s.alerted.includes(i) && !s.rearming[i] && !isDisarmed(s, i, world));
   if (fresh.length === 0) return s;
   const patrolling = { ...s.patrolling };
   for (const i of fresh) delete patrolling[i];
@@ -535,7 +536,16 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
       next = { ...next, alerted: next.alerted.filter((i) => i !== index) };
     }
     const alerted = next.alerted.includes(index);
-    const rearm = next.rearming[index];
+    let rearm: Errand | undefined = next.rearming[index];
+    if (rearm && next.ruins.includes(rearm.dome)) {
+      // Its dome was destroyed on the way (#102): choose another, or, with none left, go home unarmed.
+      const again = rearmPoint(next, index, world);
+      const rearming = { ...next.rearming };
+      if (again) rearming[index] = again;
+      else delete rearming[index];
+      next = { ...next, rearming };
+      rearm = again ?? undefined;
+    }
     let patrol = alerted || rearm ? undefined : next.patrolling[index];
     if (patrol && next.time >= patrol.until) {
       // The power is back: the rounds are over.
@@ -738,7 +748,7 @@ export function nearestHelper(s: DashboardState, index: number, world: World, se
   let best: number | null = null;
   let bestDistance = Infinity;
   world.targets.forEach((t, i) => {
-    if (!isArmedHelper(t.kind) || s.ruins.includes(i) || s.alerted.includes(i) || s.rearming[i]) return;
+    if (!isArmedHelper(t.kind) || s.ruins.includes(i) || s.alerted.includes(i) || s.rearming[i] || isDisarmed(s, i, world)) return;
     const engages =
       t.kind === "defender"
         ? Math.hypot(seen.x - t.col, seen.y - t.row) <= world.defenderGuardCells
@@ -869,41 +879,56 @@ export function disturbPatrollers(s: DashboardState, spot: Point, radius: number
   return next;
 }
 
+/** How many attacks an enemy's magazine holds. */
+function magazineOf(index: number, world: World): number {
+  return world.targets[index]?.kind === "patroller" ? world.patrollerMagazineAttacks : world.hunterMagazineAttacks;
+}
+
 /**
- * A hunter has made an attack (design-notes 4.10). It spends one from its magazine; once the
+ * True for an enemy that has used its magazine and has nowhere to rearm (#102): every dome in
+ * its network is destroyed. It cannot attack, is not alerted again, and is no help to a patroller;
+ * it goes home and stays there, harmless until it is destroyed.
+ */
+export function isDisarmed(s: DashboardState, index: number, world: World): boolean {
+  return (s.attacksUsed[index] ?? 0) >= magazineOf(index, world) && !s.rearming[index];
+}
+
+/**
+ * An enemy has made an attack (design-notes 4.10). It spends one from its magazine; once the
  * magazine is empty it breaks off and withdraws to rearm at a free cell beside the nearest
- * intact dome in its network that it can walk to, or at its post if there is none.
+ * intact dome in its network that it can walk to. With none, it is disarmed (#102).
  */
 export function spendAttack(s: DashboardState, index: number, world: World): DashboardState {
   const used = (s.attacksUsed[index] ?? 0) + 1;
   const spent = { ...s, attacksUsed: { ...s.attacksUsed, [index]: used } };
-  const magazine = world.targets[index]?.kind === "patroller" ? world.patrollerMagazineAttacks : world.hunterMagazineAttacks;
-  if (used < magazine) return spent;
-  return { ...spent, alerted: spent.alerted.filter((i) => i !== index), rearming: { ...spent.rearming, [index]: { ...rearmPoint(spent, index, world), until: null } } };
+  if (used < magazineOf(index, world)) return spent;
+  const errand = rearmPoint(spent, index, world);
+  const alerted = spent.alerted.filter((i) => i !== index);
+  if (errand === null) return { ...spent, alerted };
+  return { ...spent, alerted, rearming: { ...spent.rearming, [index]: errand } };
 }
 
 /**
- * Where a hunter rearms: beside the nearest intact dome in its network that it can walk to,
- * or its post. A dome cut off by high ground is passed over. A defender rearms at its own post.
+ * Where an enemy rearms (#102): beside the nearest intact dome in its network that it can walk
+ * to. Domes are the arsenal, so a ruin is no use, and a dome cut off by high ground is passed
+ * over. Hunters, defenders and patrollers alike. Null when there is none: it cannot rearm.
  */
-function rearmPoint(s: DashboardState, index: number, world: World): Point {
-  const hunter = world.targets[index];
-  if (hunter.kind === "defender") return { x: hunter.col, y: hunter.row };
+function rearmPoint(s: DashboardState, index: number, world: World): Errand | null {
+  const enemy = world.targets[index];
   const here = positionOf(s, index, world);
   const blocked = buildingCells(s, world);
-  const byDistance = (cells: Point[]) => cells.sort((a, b) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(b.x - here.x, b.y - here.y));
+  const distance = (p: Point) => Math.hypot(p.x - here.x, p.y - here.y);
   const domes = world.targets
     .map((t, i) => ({ t, i }))
-    .filter(({ t, i }) => t.kind === "dome" && t.network === hunter.network && !s.ruins.includes(i))
-    .map(({ t }) => ({ x: t.col, y: t.row }));
-  for (const dome of byDistance(domes)) {
-    const beside = OFFSETS.map(([dx, dy]) => ({ x: dome.x + dx, y: dome.y + dy })).filter(
-      (c) => isPassable(world.map, c.x, c.y, blocked) && canWalk(here, c, world.map)
-    );
-    const spot = byDistance(beside)[0];
-    if (spot) return spot;
+    .filter(({ t, i }) => t.kind === "dome" && t.network === enemy.network && !s.ruins.includes(i))
+    .sort((a, b) => distance({ x: a.t.col, y: a.t.row }) - distance({ x: b.t.col, y: b.t.row }));
+  for (const { t, i } of domes) {
+    const beside = OFFSETS.map(([dx, dy]) => ({ x: t.col + dx, y: t.row + dy }))
+      .filter((c) => isPassable(world.map, c.x, c.y, blocked) && canWalk(here, c, world.map))
+      .sort((a, b) => distance(a) - distance(b));
+    if (beside[0]) return { ...beside[0], dome: i, until: null };
   }
-  return { x: hunter.col, y: hunter.row };
+  return null;
 }
 
 /**
@@ -961,7 +986,7 @@ export function hunterInRange(s: DashboardState, world: World, range: number): n
   if (s.time < s.breatherUntil) return null;
   for (const index of s.alerted) {
     const t = world.targets[index];
-    if (!t || !isEnemyKind(t.kind) || s.ruins.includes(index) || s.rearming[index] || isHidden(s, index, world)) continue;
+    if (!t || !isEnemyKind(t.kind) || s.ruins.includes(index) || s.rearming[index] || isDisarmed(s, index, world) || isHidden(s, index, world)) continue;
     if (s.time < (s.hunterReadyAt[index] ?? 0) || s.heldAttacks.includes(index)) continue;
     const p = positionOf(s, index, world);
     if (distanceTo(s.pos, p.x, p.y) <= range) return index;

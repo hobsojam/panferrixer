@@ -13,8 +13,7 @@ import {
   spendAttack,
   stepDashboard,
   worldFor,
-  type DashboardState,
-} from "../src/dashboard";
+  type DashboardState, isDisarmed } from "../src/dashboard";
 import { createInitialState } from "../src/flight";
 
 // Turn-taking: time stops while targeting, a breather after each attack, and a magazine.
@@ -119,10 +118,30 @@ describe("a magazine, then a retreat to rearm", () => {
     expect(domes.some((d) => Math.abs(d.col - spot.x) + Math.abs(d.row - spot.y) === 1)).toBe(true);
   });
 
-  it("falls back to its post when its network has no intact dome", () => {
+  it("with no intact dome in its network it cannot rearm: it goes home and stays out of the fight (#102)", () => {
     const domes = world.targets.map((t, i) => (t.kind === "dome" && t.network === hunter.network ? i : -1)).filter((i) => i >= 0);
     const empty = spendAttack(spendAttack(beside({ ruins: domes }), hunterIndex, world), hunterIndex, world);
-    expect({ x: empty.rearming[hunterIndex].x, y: empty.rearming[hunterIndex].y }).toEqual(post);
+    expect(empty.rearming[hunterIndex]).toBeUndefined();
+    expect(isDisarmed(empty, hunterIndex, world)).toBe(true);
+    // Home again, it sees the robot but is not alerted, so it never attacks.
+    const home = run(empty, 30);
+    expect(positionOf(home, hunterIndex, world)).toEqual(post);
+    const seen = run({ ...home, pos: { x: post.x + 1, y: post.y } }, 5);
+    expect(seen.alerted).not.toContain(hunterIndex);
+  });
+
+  it("chooses again if its dome is destroyed on the way, and goes home unarmed if none is left (#102)", () => {
+    const far = { x: -100, y: -100 };
+    const empty = spendAttack(spendAttack(beside({ pos: far }), hunterIndex, world), hunterIndex, world);
+    const first = empty.rearming[hunterIndex];
+    const others = world.targets.map((t, i) => (t.kind === "dome" && t.network === hunter.network && i !== first.dome ? i : -1)).filter((i) => i >= 0);
+    // Its dome destroyed while others stand: it heads for another.
+    const rerouted = run({ ...empty, ruins: [first.dome] }, DT);
+    if (others.length > 0) expect(others).toContain(rerouted.rearming[hunterIndex].dome);
+    // Every dome destroyed: no errand, disarmed.
+    const stranded = run({ ...empty, ruins: [first.dome, ...others] }, DT);
+    expect(stranded.rearming[hunterIndex]).toBeUndefined();
+    expect(isDisarmed(stranded, hunterIndex, world)).toBe(true);
   });
 
   it("it walks to the dome, rearms, then goes home with a full magazine and no alert", () => {
