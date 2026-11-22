@@ -171,10 +171,24 @@ export const config = {
     ceaseDistance: 160, // no new warning this close to the target, so the last burst can still be dodged
   },
 
+  // Jamming (design-notes 4.1): a jammed target takes the direction marker away for short spells
+  // during the cruise, flickering in and out, and breaks up the view. Never in the terminal phase.
+  // The spells are drawn from the flight's seed. Placeholders.
+  jammer: {
+    firstAfterSeconds: 3, // calm at launch
+    spellSecondsMin: 1.2,
+    spellSecondsMax: 2.2,
+    gapSecondsMin: 2.5, // between one spell's end and the next one's start
+    gapSecondsMax: 4.5,
+    flickerSeconds: 0.3, // at each end of a spell the marker flickers rather than vanishing outright
+    clearBeforeTerminalSeconds: 1, // the last spell ends this long before the target comes into view
+  },
+
   feelTestToggles: {
     distanceIndicatorMode: "none" as DistanceIndicatorMode,
     altitudeBandsEnabled: false,
     pointDefenceEverywhere: false, // every target is defended, to tune the feel before escalation decides who is
+    jammingEverywhere: false, // every target jams, likewise
   },
 
   // The dashboard between missiles (design-notes 4.6). Counts are starting and full values;

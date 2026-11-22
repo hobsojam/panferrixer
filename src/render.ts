@@ -2,6 +2,7 @@ import type { Config } from "./config";
 import { ART, hasArt, strokeArt } from "./building-art";
 import { drawDust, drawExplosion } from "./explosion";
 import type { TargetKind } from "./local-map";
+import { jamLevel } from "./flight";
 import { terminalStart } from "./terrain";
 import type { FlightState } from "./types";
 
@@ -73,7 +74,9 @@ export function render(
     drawText(ctx, "DEFLECTED", w / 2, h / 2, 48, cfg.colors.shield, Math.min(1, state.resultElapsed * 2));
   }
 
-  drawMarker(ctx, state, cfg);
+  const jam = jamLevel(state, cfg);
+  if (jam > 0) drawInterference(ctx, state, cfg, jam);
+  if (markerShows(state, jam)) drawMarker(ctx, state, cfg);
   drawFrame(ctx, cfg);
 
   if (state.phase === "hit" || state.phase === "crash" || state.phase === "miss" || state.phase === "shotDown") {
@@ -312,6 +315,64 @@ function drawCrash(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Confi
   const radius = 110;
   drawDust(ctx, centerX, centerY, radius, state.resultElapsed, cfg.colors.mountain, state.seed);
   drawExplosion(ctx, centerX, centerY, radius, state.resultElapsed, cfg.colors.crash, cfg.colors.text, state.seed);
+}
+
+/** A repeatable 0..1 noise value, so a frame's static is the same however often it is drawn. */
+function hash(n: number): number {
+  const s = Math.sin(n * 12.9898 + 78.233) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+/**
+ * Jamming (design-notes 4.1) takes the marker away: gone while fully jammed, and flickering
+ * in and out as a spell starts and ends.
+ */
+function markerShows(state: FlightState, jam: number): boolean {
+  if (jam <= 0) return true;
+  if (jam >= 1) return false;
+  return hash(Math.floor(state.elapsed * 24)) > jam;
+}
+
+/**
+ * The view breaking up under jamming: torn bands of the picture slipping sideways, static,
+ * a rolling bright band, and SIGNAL LOST where the marker was. Stronger as the jamming deepens.
+ * The picture itself stays readable: terrain can still kill, so it is broken up, never blanked.
+ */
+function drawInterference(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config, jam: number): void {
+  const { width: w, height: h } = cfg.canvas;
+  const frame = Math.floor(state.elapsed * 24);
+
+  // Torn bands: strips of the picture shifted sideways.
+  const tears = 3 + Math.floor(hash(frame * 3.1) * 5);
+  for (let i = 0; i < tears; i++) {
+    const y = Math.floor(hash(frame * 7.3 + i) * h);
+    const bandH = 4 + Math.floor(hash(frame * 5.7 + i * 2.1) * 28);
+    const dx = (hash(frame * 9.1 + i * 4.3) - 0.5) * 160 * jam;
+    ctx.drawImage(ctx.canvas, 0, y, w, bandH, dx, y, w, bandH);
+  }
+
+  // Static.
+  ctx.fillStyle = cfg.colors.text;
+  const specks = Math.floor(1400 * jam);
+  for (let i = 0; i < specks; i++) {
+    ctx.globalAlpha = 0.25 + 0.5 * hash(frame * 1.7 + i * 0.37);
+    ctx.fillRect(hash(frame + i * 1.13) * w, hash(frame * 2.3 + i * 0.71) * h, 3, 2);
+  }
+  // Streaks of horizontal noise.
+  ctx.globalAlpha = 0.35 * jam;
+  for (let i = 0; i < 6; i++) {
+    const y = hash(frame * 4.9 + i * 3.3) * h;
+    const x = hash(frame * 6.1 + i * 1.9) * w * 0.7;
+    ctx.fillRect(x, y, w * (0.1 + 0.3 * hash(frame * 8.3 + i)), 1);
+  }
+
+  // A rolling band of brighter noise.
+  const rollY = ((state.elapsed * 260) % (h + 60)) - 30;
+  ctx.globalAlpha = 0.14 * jam;
+  ctx.fillRect(0, rollY, w, 30);
+  ctx.globalAlpha = 1;
+
+  if (jam >= 1 && hash(frame * 0.5) > 0.08) drawText(ctx, "SIGNAL LOST", w / 2, 24, 16, cfg.colors.tracer, 0.9);
 }
 
 function drawMarker(ctx: CanvasRenderingContext2D, state: FlightState, cfg: Config): void {
