@@ -43,6 +43,8 @@ The playable prototype currently includes:
   - **Patrollers** walk wide loops between the towns, investigate scans, missile hits and
     power cuts, and run to the nearest armed enemy for help when they see the robot. They are
     lightly armed themselves.
+  - Each role moves at its own pace: the hunter is the fastest of the fighters and the
+    defender the slowest. The robot can outwalk any of them, except a patroller running for help.
   - Enemies carry a limited magazine and withdraw to an intact dome in their network to rearm
     once it is empty. With every dome there destroyed, they cannot rearm and fall out of the fight.
 - **Incoming attacks:** a first-person turret defence in which the player turns and fires
