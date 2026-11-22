@@ -86,7 +86,7 @@ function renderLive(s: LiveState): void {
   } else if (s.screen === "defence") {
     renderDefence(ctx!, s.defence, shieldsDuringAttack(s.dashboard, s.defence, config), config, input.isPointerLocked(), attackerName(s.attacker));
   } else {
-    render(ctx!, s.flight, config, s.target.kind, s.shielded);
+    render(ctx!, s.flight, config, s.target.kind, s.shielded, s.target.defences);
   }
 }
 

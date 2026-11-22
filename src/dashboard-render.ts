@@ -1,5 +1,5 @@
 import { cracksOn, plateToMend, standing } from "./armour";
-import { ART, hasArt, strokeArt } from "./building-art";
+import { ART, fittingStrokes, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
 import { AVAILABLE_VERBS, VERB_GRID, blipStrength, buildingCells, gridDisableReady, isHidden, isInsideBuilding, isLow, isPaused, isResting, isSuppressed, positionOf, ringReach, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
@@ -246,6 +246,9 @@ function drawTargetingReadout(ctx: CanvasRenderingContext2D, state: DashboardSta
   if (target) {
     drawText(ctx, TARGET_LABELS[target.kind], x + 14, PANEL_TOP + 180, 18, c.panelSelected, 1, "monospace", "left");
     drawText(ctx, "IN RANGE", x + 14, PANEL_TOP + 204, 13, c.energy, 1, "monospace", "left");
+    // What the target will do to the missile (#112).
+    const warns = [target.defences?.pointDefence ? "GUNS" : null, target.defences?.jammer ? "JAMS" : null].filter(Boolean).join(" ");
+    if (warns) drawText(ctx, warns, x + 100, PANEL_TOP + 204, 13, c.tracer, 1, "monospace", "left");
     drawText(ctx, state.purpose === "gridDisable" ? "SPACE TO CUT POWER" : "SPACE TO FIRE", x + 14, PANEL_TOP + 222, 12, c.text, 0.7, "monospace", "left");
   } else {
     drawText(ctx, state.purpose === "gridDisable" ? "NO POWER STATION IN RANGE" : "NO TARGET IN RANGE", x + 14, PANEL_TOP + 180, 13, c.panelDim, 1, "monospace", "left");
@@ -323,12 +326,15 @@ function drawLocalMap(
       return;
     }
     const inRange = targeting && state.target === index;
-    const color = inRange ? c.panelSelected : c.text;
+    // A hardened enemy is drawn in the warning colour (#112): its fittings are too small to read alone.
+    const color = inRange ? c.panelSelected : t.defences ? c.tracer : c.text;
     const iconWidth = cfg.dashboard.targetIconWidth;
     // An enemy passing through a building is drawn faint, so it reads as inside, not a glitch.
     ctx.globalAlpha = isInsideBuilding(state, index, world) ? 0.3 : targeting && !inRange ? 0.6 : 1;
     if (hasArt(t.kind)) {
       strokeArt(ctx, ART[t.kind].simple, tx, ty + iconWidth / 4, iconWidth / 2, color, 1.2, inRange ? 6 : 0);
+      // A hardened enemy shows its turret or mast (#112), so a defended region is seen before it is entered.
+      if (t.defences) strokeArt(ctx, fittingStrokes(ART[t.kind].simple, t.defences), tx, ty + iconWidth / 4, iconWidth / 2, color, 1.2, 0);
     } else {
       drawPlaceholderMarker(ctx, tx, ty, color, inRange);
     }
