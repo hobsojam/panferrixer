@@ -264,6 +264,14 @@ The original already has four types (dome, power plant, mine, beacon), each with
   - Comms cooldown: one call per period.
   - "Dogpile check" in the PoC: log the maximum number of simultaneous attackers and the time from alert to first arrival.
 - Principle: escalation should be pressure the player can read and manage, not a trap they cannot recover from.
+- **Agreed: difficulty by distance from spawn (author).** Tougher enemy types are placed at generation in networks further from where the player starts; nothing is upgraded in place (author: "upgrading existing enemies doesn't make sense").
+  - The curve follows the route: near towns are soft, far towns tough, and the player works outward collecting upgrades (4.4), so upgrades stay a gain with no reason to hold back.
+  - Distance is path distance through the passes, not straight-line, as parts placement already measures reachability.
+  - A gradient, not a hard edge: for example, near networks standard types, middle networks some carrying point defence (4.11), far networks point defence and jamming (4.1). Banding to be proposed.
+  - Some parts are biased toward far networks, so the player goes there with their best upgrades.
+  - A tougher type has its own look on the map and in the flight art (#112), so the player sees a defended region before committing. Tougher means harder to reach, never more health: one hit still kills.
+  - Replacement (#70) is world simulation, not a difficulty tool: a replacement is the same type as what it replaces.
+- **Considered and set aside: escalation by damage done.** A hidden, one-way stage raised by material lost, hardening machines in place or only through replacements. Set aside because upgrading existing machines does not make sense, and replacements would rarely be built: the player destroys a town's domes, its factories, early, as they are the arsenal. Damage may still be kept as one light trigger, such as the bosses coming out (#71); undecided.
 
 ### 4.6 Dashboard and verbs
 - Verb set: **Move, Scan, Missile and Grid-disable**. Extract was dropped (author: any opportunity to use it would always be taken, so it is just a button labelled "click me"); collection is automatic (section 4.3). Status is folded into an ambient display (batteries, damage, the state-of-mind trace). Cut the robot ID icon and the info icon (replace with contextual information on selected targets, and optionally a catalogue that fills in as enemies are met). Guns become a reactive mini-game, not an icon.
