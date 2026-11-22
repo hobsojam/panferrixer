@@ -135,13 +135,13 @@ function updateLive(state: LiveState, input: AppInput, dt: number, cfg: Config, 
         screen: "flight",
         dashboard,
         // A nearer target is a shorter flight (design-notes 4.10).
-        // Point defence (design-notes 4.11): which targets carry it is for escalation to decide; for now
-        // only the feel-test toggle turns it on.
+        // Point defence (design-notes 4.11) and jamming (4.1): which targets carry them is for escalation
+        // to decide; for now only the feel-test toggles turn them on.
         flight: createInitialState(
           newSeed(),
           cfg,
           flightSecondsFor(rangeTo(dashboard, world.targets.indexOf(step.fire), world), cfg),
-          cfg.feelTestToggles.pointDefenceEverywhere
+          { pointDefence: cfg.feelTestToggles.pointDefenceEverywhere, jammer: cfg.feelTestToggles.jammingEverywhere }
         ),
         target: step.fire,
         targetIndex: world.targets.indexOf(step.fire),

@@ -39,6 +39,21 @@ export interface FlightState {
   rounds: Round[]; // in the air, coming at the missile
   bursts: Burst[]; // announced by a muzzle flash, then fired as a short stream
   nextBurstAt: number | null; // flight time of the next burst's warning; null until the terminal phase
+  // Jamming (design-notes 4.1): spells, in flight time, when the direction marker is gone and the view
+  // breaks up. Drawn from the seed when the flight starts; empty for an unjammed target.
+  jams: Jam[];
+}
+
+/** One spell of jamming, in flight time. Never in the terminal phase: the target is in sight by then. */
+export interface Jam {
+  start: number;
+  end: number;
+}
+
+/** What a target defends itself with on the missile's flight. */
+export interface FlightDefences {
+  pointDefence?: boolean;
+  jammer?: boolean;
 }
 
 /** One round of point-defence fire: it flies from the target toward the missile along a fixed lateral line. */

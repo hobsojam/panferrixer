@@ -1,6 +1,7 @@
 import type { Config } from "./config";
 import { generateTerrain, isBlockedAt, terminalStart } from "./terrain";
-import type { Burst, FlightState, Round, SteeringInput } from "./types";
+import { createRng } from "./rng";
+import type { Burst, FlightDefences, FlightState, Jam, Round, SteeringInput } from "./types";
 
 /** The missile's forward speed: the same on every flight, so a shorter flight is a shorter course. */
 function forwardSpeed(cfg: Config): number {
@@ -15,8 +16,13 @@ export function flightSecondsFor(cells: number, cfg: Config): number {
   return Math.min(cfg.flight.durationSeconds, cfg.flight.baseSeconds + cfg.flight.secondsPerCell * Math.max(0, cells));
 }
 
-/** A new flight. Without a duration it is the longest flight. A defended target has point defence. */
-export function createInitialState(seed: number, cfg: Config, durationSeconds: number = cfg.flight.durationSeconds, defended = false): FlightState {
+/** A new flight. Without a duration it is the longest flight. A target's defences shape it: point defence, jamming. */
+export function createInitialState(
+  seed: number,
+  cfg: Config,
+  durationSeconds: number = cfg.flight.durationSeconds,
+  defences: FlightDefences = {}
+): FlightState {
   const totalDistance = forwardSpeed(cfg) * Math.min(durationSeconds, cfg.flight.durationSeconds);
   return {
     seed,
@@ -30,11 +36,46 @@ export function createInitialState(seed: number, cfg: Config, durationSeconds: n
     resultElapsed: 0,
     terrain: generateTerrain(seed, cfg, totalDistance),
     nextBandIndex: 0,
-    defended,
+    defended: defences.pointDefence ?? false,
     rounds: [],
     bursts: [],
     nextBurstAt: null,
+    jams: defences.jammer ? jamSpells(seed, totalDistance, cfg) : [],
   };
+}
+
+/**
+ * When a jammed flight loses its marker (design-notes 4.1): spells of a second or two with
+ * gaps between, drawn from the seed, all over before the terminal phase so the target is never
+ * jammed once it is in sight.
+ */
+export function jamSpells(seed: number, totalDistance: number, cfg: Config): Jam[] {
+  const j = cfg.jammer;
+  const rng = createRng(seed * 4813 + 17);
+  const between = (min: number, max: number) => min + rng() * (max - min);
+  const lastEnd = terminalStart(totalDistance, cfg) / forwardSpeed(cfg) - j.clearBeforeTerminalSeconds;
+  const spells: Jam[] = [];
+  let start = j.firstAfterSeconds;
+  while (true) {
+    const end = start + between(j.spellSecondsMin, j.spellSecondsMax);
+    if (end > lastEnd) break;
+    spells.push({ start, end });
+    start = end + between(j.gapSecondsMin, j.gapSecondsMax);
+  }
+  return spells;
+}
+
+/**
+ * How badly the flight is jammed now, from 0 (clear) to 1 (the marker is gone). It ramps up and
+ * down over the flicker time at each end of a spell, where the marker flickers.
+ */
+export function jamLevel(state: FlightState, cfg: Config): number {
+  const ramp = cfg.jammer.flickerSeconds;
+  for (const spell of state.jams) {
+    if (state.elapsed < spell.start || state.elapsed > spell.end) continue;
+    return Math.min(1, (state.elapsed - spell.start) / ramp, (spell.end - state.elapsed) / ramp);
+  }
+  return 0;
 }
 
 function isResult(phase: FlightState["phase"]): boolean {

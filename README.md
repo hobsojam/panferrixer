@@ -23,8 +23,9 @@ The playable prototype currently includes:
 - **Missile strikes:** targeting nearby buildings and enemies, then a forward-looking
   wireframe flight over generated terrain, with terminal target art, collisions, misses and
   explosions. A nearer target is a shorter flight. A defended target fires aimed bursts at the
-  missile in the last seconds, which the player dodges; for now only a feel-test toggle in
-  `src/config.ts` turns this on.
+  missile in the last seconds, which the player dodges. A jamming target takes the direction
+  marker away for short spells during the cruise and breaks up the view. For now only feel-test
+  toggles in `src/config.ts` turn these on.
 - **Network shields:** suppressed for a timed window by striking a power station or using
   grid disable.
 - **Persistent destruction:** a successful unshielded strike leaves a ruin on the map.

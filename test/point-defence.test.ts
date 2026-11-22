@@ -13,7 +13,7 @@ const pd = config.pointDefence;
 
 /** A defended flight over open ground, so only the point defence can stop it. */
 function defendedFlight(seed = 1): FlightState {
-  return { ...createInitialState(seed, config, config.flight.durationSeconds, true), terrain: { bands: [] } };
+  return { ...createInitialState(seed, config, config.flight.durationSeconds, { pointDefence: true }), terrain: { bands: [] } };
 }
 
 type Policy = (s: FlightState) => number;
