@@ -65,7 +65,7 @@ export function createAppState(cfg: Config): AppState {
 }
 
 function isResult(phase: FlightState["phase"]): boolean {
-  return phase === "hit" || phase === "crash" || phase === "miss";
+  return phase === "hit" || phase === "crash" || phase === "miss" || phase === "shotDown";
 }
 
 /** The armour as shown during an attack: each plate's integrity, and which plate took the last hit. */
@@ -135,7 +135,14 @@ function updateLive(state: LiveState, input: AppInput, dt: number, cfg: Config, 
         screen: "flight",
         dashboard,
         // A nearer target is a shorter flight (design-notes 4.10).
-        flight: createInitialState(newSeed(), cfg, flightSecondsFor(rangeTo(dashboard, world.targets.indexOf(step.fire), world), cfg)),
+        // Point defence (design-notes 4.11): which targets carry it is for escalation to decide; for now
+        // only the feel-test toggle turns it on.
+        flight: createInitialState(
+          newSeed(),
+          cfg,
+          flightSecondsFor(rangeTo(dashboard, world.targets.indexOf(step.fire), world), cfg),
+          cfg.feelTestToggles.pointDefenceEverywhere
+        ),
         target: step.fire,
         targetIndex: world.targets.indexOf(step.fire),
         shielded: isShielded(dashboard, step.fire),
