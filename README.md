@@ -24,8 +24,9 @@ The playable prototype currently includes:
   wireframe flight over generated terrain, with terminal target art, collisions, misses and
   explosions. A nearer target is a shorter flight. A defended target fires aimed bursts at the
   missile in the last seconds, which the player dodges. A jamming target takes the direction
-  marker away for short spells during the cruise and breaks up the view. For now only feel-test
-  toggles in `src/config.ts` turn these on.
+  marker away for short spells during the cruise and breaks up the view. These come with hardened
+  hunters (jamming) and defenders (point defence), found further from the start; feel-test
+  toggles in `src/config.ts` put them on every target.
 - **Network shields:** suppressed for a timed window by striking a power station or using
   grid disable.
 - **Persistent destruction:** a successful unshielded strike leaves a ruin on the map.

@@ -188,10 +188,12 @@ describe("what each building and enemy holds", () => {
 
   it("never more units than a kind's maximum", () => {
     for (const t of targets) {
-      const rolls = config.localMap.supplyChances[t.kind as keyof typeof config.localMap.supplyChances];
-      if (rolls === undefined) continue;
+      const base = config.localMap.supplyChances[t.kind as keyof typeof config.localMap.supplyChances];
+      if (base === undefined) continue;
+      // A hardened machine rolls its own missile chances (design-notes 4.5).
+      const rolls = { ...base, ...(t.defences ? config.localMap.hardenedSupplyChances[t.kind as "hunter" | "defender"] : {}) };
       for (const supply of ["energy", "armour", "missiles"] as const) {
-        expect(t.supplies.filter((s) => s === supply).length).toBeLessThanOrEqual(rolls[supply].max);
+        expect(t.supplies.filter((s) => s === supply).length).toBeLessThanOrEqual(rolls[supply]!.max);
       }
     }
   });

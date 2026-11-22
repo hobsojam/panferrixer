@@ -276,9 +276,20 @@ export const config = {
       defender: { energy: { max: 1, chance: 0.2 }, armour: { max: 2, chance: 0.55 }, missiles: { max: 1, chance: 0.4 } },
     },
     // Parts (design-notes 4.4): a fixed set placed over the world, not rolled. Placeholders.
-    partCount: 6, // the original's six pieces
+    partCount: 6, // placeholder: one per upgrade, to be decided
     partWeights: { dome: 3, commsCentre: 1 }, // domes are the haystack; electronics may hold a part too
     partsPerNetworkMax: 2, // some networks hold none and a few hold two
+    // Difficulty by distance (design-notes 4.5). Placeholders.
+    bandShares: { near: 0.4, middle: 0.35 }, // the rest, about a quarter, are far
+    middleHardenChance: 0.5,
+    farBothChance: 0.5,
+    // Hardened machines are more likely to carry missiles (author: "we need to use more"); their
+    // other supplies roll as for their kind.
+    hardenedSupplyChances: {
+      hunter: { missiles: { max: 3, chance: 0.75 } },
+      defender: { missiles: { max: 2, chance: 0.7 } },
+    },
+    partsFarMin: 2,
     // Patrollers (#66): wide beats between the towns, a few in each segment of the map. Placeholders.
     patrolSegmentsAcross: 3,
     patrolSegmentsDown: 2,
