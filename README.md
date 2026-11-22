@@ -30,7 +30,7 @@ The playable prototype currently includes:
 - **Network shields:** suppressed for a timed window by striking a power station or using
   grid disable.
 - **Persistent destruction:** a successful unshielded strike leaves a ruin on the map.
-- **Salvage:** ruins and the wrecks of hunters and defenders can hold energy, armour and missile
+- **Salvage:** ruins and the wrecks of hunters, defenders and haulers can hold energy, armour and missile
   supplies, rolled unit by unit for each kind. A fixed set of six parts is also placed in
   buildings across the world. A visible scan pulse marks ruins and wrecks that still hold
   something, and walking close enough collects it. Parts are collectables for now; what they
@@ -43,6 +43,11 @@ The playable prototype currently includes:
   - **Patrollers** walk wide loops between the towns, investigate scans, missile hits and
     power cuts, and run to the nearest armed enemy for help when they see the robot. They are
     lightly armed themselves.
+  - Each network's **hauler** carries cargo round its power station, mines and domes. It never
+    attacks. Seeing the robot, a scan ring that reaches it, or a missile hit nearby sends it
+    fleeing, slower than the robot can walk, and it goes back to its route once nothing has
+    scared it for a while. One missile destroys it, and its cargo of energy and armour lies in
+    the wreck for the scan and pickup to find.
   - Each role moves at its own pace: the hunter is the fastest of the fighters and the
     defender the slowest. The robot can outwalk any of them, except a patroller running for help.
   - Enemies carry a limited magazine and withdraw to an intact dome in their network to rearm

@@ -2,6 +2,7 @@ import type { Config } from "./config";
 import {
   createDashboardState,
   disturbPatrollers,
+  scareHaulers,
   drainEnergy,
   hunterInRange,
   isOutOfEnergy,
@@ -25,7 +26,7 @@ import {
 import { hitPlate, plateFacing, standing } from "./armour";
 import { createDefence, fanHalfArc, hitBearings, stepDefence, summaryOver, type Aim, type DefenceState } from "./defence";
 import { createInitialState, flightSecondsFor, updateFlight } from "./flight";
-import type { Target } from "./local-map";
+import { isEnemyKind, type Target } from "./local-map";
 import type { FlightState } from "./types";
 
 /**
@@ -200,11 +201,16 @@ function updateLive(state: LiveState, input: AppInput, dt: number, cfg: Config, 
   const timed: DashboardState = moveHunters(drainEnergy({ ...state.dashboard, time: state.dashboard.time + dt }, dt, 0, world), world, dt);
   const flight = updateFlight(state.flight, input.steering, dt, cfg);
 
-  // A missile hit is a disturbance: patrollers within earshot come to look (#66).
+  // A missile hit is a disturbance: patrollers within earshot come to look (#66), and haulers
+  // within earshot flee from it (#67).
   const struck = flight.phase === "hit" && state.flight.phase !== "hit";
-  const heard = struck
-    ? disturbPatrollers(timed, positionOf(timed, state.targetIndex, world), world.patrollerHearingCells, world)
+  const spot = positionOf(timed, state.targetIndex, world);
+  const scared = struck
+    ? scareHaulers(disturbPatrollers(timed, spot, world.patrollerHearingCells, world), spot, world.haulerHearingCells, world, state.targetIndex)
     : timed;
+  // An enemy is destroyed the moment it is hit (it has no shield), so it stops where it was struck
+  // while the result shows, and its wreck, with any cargo, lies there (#67).
+  const heard = struck && isEnemyKind(state.target.kind) ? markRuin(scared, state.targetIndex) : scared;
   // A hit on a power station takes its network's shields down. The station itself survives.
   if (struck && state.target.kind === "power") {
     return { ...state, dashboard: openWindow(heard, networkOf(state.target), world), flight };
