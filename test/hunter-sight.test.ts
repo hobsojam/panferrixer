@@ -4,6 +4,7 @@ import { createAppState, updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
 import {
   alertHunters,
+  buildingCells,
   createDashboardState,
   moveHunters,
   positionOf,
@@ -14,7 +15,7 @@ import {
   type World,
 } from "../src/dashboard";
 import { generateWorld, inTown } from "../src/local-map";
-import { cellKey, findRoute, isPassable } from "../src/route";
+import { findRoute, isPassable } from "../src/route";
 
 // Hunter sight and the start position: design-notes 4.7 and 4.10. The outage patrol is in outage-patrol.test.ts.
 const DT = 1 / 60;
@@ -39,7 +40,9 @@ describe("the start position", () => {
     for (const t of w.targets.filter((t) => t.kind === "hunter")) {
       expect(Math.hypot(t.col - start.x, t.row - start.y), `seed ${seed} starts in sight of a hunter`).toBeGreaterThan(config.dashboard.hunterSightCells + clearance);
     }
-    const blocked = new Set(w.targets.filter((t) => t.kind !== "hunter").map((t) => cellKey(w.map, t.col, t.row)));
+    // Only intact buildings block the robot; it walks through enemies (#99: blocking them here made a
+    // defender posted on the town's centre cell look like a wall). Its route is planned the same way.
+    const blocked = buildingCells(createDashboardState(config), w);
     expect(isPassable(w.map, start.x, start.y, blocked)).toBe(true);
     expect(findRoute(start, w.towns[config.dashboard.startNode], w.map, blocked), `seed ${seed} cannot walk in`).not.toBeNull();
   }
@@ -49,7 +52,8 @@ describe("the start position", () => {
   });
 
   it("holds across many worlds", () => {
-    for (let seed = 1; seed <= 25; seed++) {
+    // Seed 57 is the one that found #99.
+    for (let seed = 1; seed <= 60; seed++) {
       const generated = generateWorld({ ...config.localMap, worldSeed: seed });
       check({ ...world, ...generated }, seed);
     }
