@@ -193,7 +193,7 @@ describe("what each building and enemy holds", () => {
       // A hardened machine rolls its own missile chances (design-notes 4.5).
       const rolls = { ...base, ...(t.defences ? config.localMap.hardenedSupplyChances[t.kind as "hunter" | "defender"] : {}) };
       for (const supply of ["energy", "armour", "missiles"] as const) {
-        expect(t.supplies.filter((s) => s === supply).length).toBeLessThanOrEqual(rolls[supply]!.max);
+        expect(t.supplies.filter((s) => s === supply).length).toBeLessThanOrEqual(rolls[supply]?.max ?? 0);
       }
     }
   });

@@ -76,6 +76,12 @@ export interface World {
   patrollerHelpReachCells: number; // this close to the enemy it fetches, help is raised
   patrollerLeashCells: number; // once fighting, how far it follows from where it started
   patrollerMagazineAttacks: number;
+  haulerSpeed: number; // cells per second on its route
+  haulerFleeSpeed: number; // cells per second while fleeing
+  haulerSightCells: number;
+  haulerHearingCells: number; // a missile hit this close scares it
+  haulerFleeCells: number; // how many steps over the terrain it looks for somewhere to flee to
+  haulerFleeSeconds: number; // how long it keeps away after it last saw or heard the threat
   viewCols: number; // the mini map's local window, in cells: also the reach of the robot's equipment
   viewRows: number;
   // The energy and shield economy (#15). Energy is a slow clock: it drains with time and walking.
@@ -141,6 +147,22 @@ export interface DashboardState {
   patrollers: Record<number, PatrollerMind>;
   // Every call for help a patroller has raised, oldest first: observable by game logic and tests.
   helpCalls: HelpCall[];
+  // What each hauler is doing (#67). Missing means it is on its route, heading for its second stop.
+  haulers: Record<number, HaulerMind>;
+}
+
+/**
+ * A hauler's state of mind (#67, design-notes 4.10). On its **route** it carries its cargo round
+ * its stops. **Fleeing**, it runs from a threat (the robot in sight, a scan ring that reaches it,
+ * a missile hit within earshot) to somewhere away from it, and keeps away until `until` has passed
+ * without a fresh threat. Then it goes back to the nearest stop on its route.
+ */
+export interface HaulerMind {
+  mode: "route" | "flee";
+  leg: number; // index into its route of the stop it is heading for
+  threat: Point | null; // where the threat was last seen or heard
+  goal: Point | null; // where it is fleeing to
+  until: number | null; // dashboard time it stops fleeing, if nothing new scares it
 }
 
 /**
@@ -232,6 +254,12 @@ export function worldFor(cfg: Config): World {
       patrollerHelpReachCells: cfg.dashboard.patrollerHelpReachCells,
       patrollerLeashCells: cfg.dashboard.patrollerLeashCells,
       patrollerMagazineAttacks: cfg.dashboard.patrollerMagazineAttacks,
+      haulerSpeed: cfg.dashboard.haulerSpeed,
+      haulerFleeSpeed: cfg.dashboard.haulerFleeSpeed,
+      haulerSightCells: cfg.dashboard.haulerSightCells,
+      haulerHearingCells: cfg.dashboard.haulerHearingCells,
+      haulerFleeCells: cfg.dashboard.haulerFleeCells,
+      haulerFleeSeconds: cfg.dashboard.haulerFleeSeconds,
       viewCols: cfg.localMap.viewCols,
       viewRows: cfg.localMap.viewRows,
       energyMax: cfg.dashboard.energyCells,
@@ -284,6 +312,7 @@ export function createDashboardState(cfg: Config): DashboardState {
     heldAttacks: [],
     patrollers: {},
     helpCalls: [],
+    haulers: {},
   };
 }
 
@@ -512,6 +541,10 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
   let next = s;
   world.targets.forEach((t, index) => {
     if (!isEnemyKind(t.kind) || next.ruins.includes(index) || isHidden(next, index, world)) return;
+    if (t.kind === "hauler") {
+      next = stepHauler(next, index, world, dt);
+      return;
+    }
     const patroller = t.kind === "patroller";
     if (patroller && !next.alerted.includes(index) && !next.rearming[index]) {
       next = stepPatroller(next, index, world, dt);
@@ -879,6 +912,132 @@ export function disturbPatrollers(s: DashboardState, spot: Point, radius: number
   return next;
 }
 
+/** A hauler's state of mind; one never seen to change is on its route, heading for its second stop. */
+export function haulerMindOf(s: DashboardState, index: number, world: World): HaulerMind {
+  const route = world.targets[index].beat ?? [];
+  return s.haulers[index] ?? { mode: "route", leg: route.length > 1 ? 1 : 0, threat: null, goal: null, until: null };
+}
+
+function withHaulerMind(s: DashboardState, index: number, mind: HaulerMind): DashboardState {
+  return { ...s, haulers: { ...s.haulers, [index]: mind } };
+}
+
+/**
+ * A hauler takes fright at a threat at `spot` (#67): it flees from there, and keeps away for
+ * haulerFleeSeconds from now. Already fleeing, it turns from the newer threat, and its time is
+ * extended, never shortened.
+ */
+function frighten(s: DashboardState, index: number, spot: Point, world: World): DashboardState {
+  const mind = haulerMindOf(s, index, world);
+  const until = Math.max(s.time + world.haulerFleeSeconds, mind.until ?? 0);
+  const moved = mind.threat === null || mind.threat.x !== spot.x || mind.threat.y !== spot.y;
+  return withHaulerMind(s, index, { ...mind, mode: "flee", threat: { ...spot }, goal: moved ? null : mind.goal, until });
+}
+
+/**
+ * Something threatening happened at `spot` (#67, design-notes 4.2 and 4.10): a scan pulse, or a
+ * missile hit. Every hauler within `radius` that is not destroyed flees from it, except `struck`:
+ * the hauler the missile hit is a wreck, and its cargo lies where it was hit.
+ */
+export function scareHaulers(s: DashboardState, spot: Point, radius: number, world: World, struck: number | null = null): DashboardState {
+  let next = s;
+  world.targets.forEach((t, index) => {
+    if (t.kind !== "hauler" || index === struck || next.ruins.includes(index)) return;
+    const here = positionOf(next, index, world);
+    if (Math.hypot(spot.x - here.x, spot.y - here.y) > radius) return;
+    next = frighten(next, index, spot, world);
+  });
+  return next;
+}
+
+/**
+ * Where a hauler flees to (#67): of the open cells it can walk to within haulerFleeCells steps
+ * over the terrain, the one furthest from the threat. Enemies never stop on a building, so those
+ * are passed over. Ties go to the fewer steps, then the lower cell key, so the choice is
+ * deterministic. With nowhere further away it stays where it is: cornered.
+ */
+export function fleeGoal(s: DashboardState, here: Point, threat: Point, world: World): Point {
+  const map = world.map;
+  const start = { x: Math.round(here.x), y: Math.round(here.y) };
+  const buildings = buildingCells(s, world);
+  const away = (c: Point) => Math.hypot(c.x - threat.x, c.y - threat.y);
+  let best: Point = start;
+  let bestAway = buildings.has(cellKey(map, start.x, start.y)) ? -Infinity : away(start);
+  const seen = new Set<number>([cellKey(map, start.x, start.y)]);
+  let frontier: Point[] = [start];
+  for (let step = 0; step < world.haulerFleeCells && frontier.length > 0; step++) {
+    const ring: Point[] = [];
+    for (const c of frontier) {
+      for (const [dx, dy] of OFFSETS) {
+        const nx = c.x + dx;
+        const ny = c.y + dy;
+        if (nx < 0 || ny < 0 || nx >= map.cols || ny >= map.rows || map.tiers[ny][nx] === 2) continue;
+        const k = cellKey(map, nx, ny);
+        if (seen.has(k)) continue;
+        seen.add(k);
+        ring.push({ x: nx, y: ny });
+      }
+    }
+    ring.sort((a, b) => cellKey(map, a.x, a.y) - cellKey(map, b.x, b.y));
+    for (const c of ring) {
+      if (buildings.has(cellKey(map, c.x, c.y))) continue;
+      const d = away(c);
+      if (d > bestAway) {
+        best = c;
+        bestAway = d;
+      }
+    }
+    frontier = ring;
+  }
+  return best;
+}
+
+/**
+ * One step of a hauler (#67, design-notes 4.10): defensive. It is always looking: the robot in
+ * sight is a threat, and it flees. Fleeing, it heads for the place furthest from the threat it can
+ * reach soon, choosing again whenever the threat has moved round so that its goal no longer takes it
+ * away. Once its time is up with nothing new, it goes back to the nearest stop on its route and
+ * carries on. Its cargo goes with it: a wreck lies where it fell.
+ */
+function stepHauler(s: DashboardState, index: number, world: World, dt: number): DashboardState {
+  const route = world.targets[index].beat ?? [];
+  const here = positionOf(s, index, world);
+  let next = s;
+  if (distanceTo(s.pos, here.x, here.y) <= world.haulerSightCells) {
+    next = frighten(next, index, { x: Math.round(s.pos.x), y: Math.round(s.pos.y) }, world);
+  }
+  let mind = haulerMindOf(next, index, world);
+
+  if (mind.mode === "flee" && mind.threat) {
+    if (next.time >= (mind.until ?? 0)) {
+      // Nothing new for long enough: back to work, from the nearest stop.
+      mind = { mode: "route", leg: nearestLeg(route, here), threat: null, goal: null, until: null };
+      next = withHaulerMind(next, index, mind);
+    } else {
+      const threat = mind.threat;
+      const away = (p: Point) => Math.hypot(p.x - threat.x, p.y - threat.y);
+      let goal = mind.goal;
+      if (goal === null || away(goal) < away(here)) {
+        goal = fleeGoal(next, here, threat, world);
+        next = withHaulerMind(next, index, { ...mind, goal });
+      }
+      if (here.x === goal.x && here.y === goal.y) return next;
+      return moveHauler(next, index, goal, world.haulerFleeSpeed * dt, world);
+    }
+  }
+
+  if (route.length === 0) return next;
+  let leg = mind.leg % route.length;
+  if (here.x === route[leg].x && here.y === route[leg].y) leg = (leg + 1) % route.length;
+  if (leg !== mind.leg) next = withHaulerMind(next, index, { ...mind, leg });
+  return moveHauler(next, index, route[leg], world.haulerSpeed * dt, world);
+}
+
+function moveHauler(s: DashboardState, index: number, goal: Point, distance: number, world: World): DashboardState {
+  const pos = stepToward(positionOf(s, index, world), goal, world.map, distance);
+  return { ...s, hunterPos: { ...s.hunterPos, [index]: pos } };
+}
+
 /** How many attacks an enemy's magazine holds. */
 function magazineOf(index: number, world: World): number {
   return world.targets[index]?.kind === "patroller" ? world.patrollerMagazineAttacks : world.hunterMagazineAttacks;
@@ -1104,7 +1263,13 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
     }
     if (verb === "scan") {
       // A patroller the ring reaches comes to look where the pulse came from (#66).
-      const heard = disturbPatrollers(alertTo(s, alertHunters(s, world), world), s.pos, world.scanRadius, world);
+      // A hauler the ring reaches flees from it (#67).
+      const heard = scareHaulers(
+        disturbPatrollers(alertTo(s, alertHunters(s, world), world), s.pos, world.scanRadius, world),
+        s.pos,
+        world.scanRadius,
+        world
+      );
       return { ...heard, zoom: "local", scan: scanFrom(s, world), pulseStarted: s.time };
     }
     if (verb === "gridDisable" && gridDisableReady(s)) {
