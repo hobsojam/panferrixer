@@ -1,6 +1,7 @@
 import { NETWORK } from "./map";
 import { cellKey, findRoute, isPassable, OFFSETS, reachableFrom, reachableMask, type Cell } from "./route";
 import { createRng } from "./rng";
+import type { FlightDefences } from "./types";
 
 /** 0 = valley, 1 = ground, 2 = high ground. */
 export type Tier = 0 | 1 | 2;
@@ -33,6 +34,13 @@ export interface LocalMapConfig {
   patrolBeatSpacing: number; // waypoints on one loop are at least this many cells apart
   startTown: number; // the town where the robot begins
   patrolStartClearCells: number; // no beat comes this close to the start town's centre
+  // Difficulty by distance (design-notes 4.5): towns ranked by walking distance from the start town
+  // fall into bands; further bands hold hardened hunters (jamming) and defenders (point defence).
+  bandShares: { near: number; middle: number }; // the nearest share of towns, then the next; the rest are far
+  middleHardenChance: number; // each hunter and defender in a middle town is hardened with this chance
+  farBothChance: number; // each hardened defender in a far town also jams with this chance
+  hardenedSupplyChances: Partial<Record<TargetKind, Partial<Record<Supply, SupplyRoll>>>>; // replaces the kind's rolls for those supplies
+  partsFarMin: number; // at least this many parts lie in far towns, when there is room
   viewCols: number; // the mini map's local window
   viewRows: number;
 }
@@ -75,7 +83,11 @@ export interface Target {
   network: number; // the town (network) it was placed in. Towns can overlap, so position alone does not say
   home?: number; // a defender's dome (target index); its col and row are the free cell beside it, its post
   beat?: Cell[]; // a patroller's loop of waypoints; its col and row are the first, where it starts
+  defences?: FlightDefences; // a hardened enemy's defences against a missile; none for the standard types
 }
+
+/** How far a town is from the start, for difficulty (design-notes 4.5). */
+export type Band = "near" | "middle" | "far";
 
 /** True for the enemies: they move, have no shields and are not buildings. */
 export function isEnemyKind(kind: TargetKind): boolean {
@@ -91,6 +103,25 @@ export interface World {
   map: LocalMap;
   towns: Town[];
   targets: Target[];
+  bands: Band[]; // per town (network)
+}
+
+/**
+ * Each town's band (design-notes 4.5): towns ranked by walking distance from the start town's
+ * centre, over the terrain alone, and split by share. The start town is always near. A town that
+ * cannot be walked to counts as far.
+ */
+export function townBands(map: LocalMap, towns: readonly Town[], cfg: LocalMapConfig): Band[] {
+  const start = towns[cfg.startTown] ?? towns[0];
+  const steps = towns.map((t, i) => (i === cfg.startTown ? -1 : (findRoute(start, t, map)?.length ?? Infinity)));
+  const order = towns.map((_, i) => i).sort((a, b) => steps[a] - steps[b] || a - b);
+  const nearCount = Math.max(1, Math.round(towns.length * cfg.bandShares.near));
+  const middleCount = Math.round(towns.length * cfg.bandShares.middle);
+  const bands: Band[] = towns.map(() => "far");
+  order.forEach((town, rank) => {
+    bands[town] = rank < nearCount ? "near" : rank < nearCount + middleCount ? "middle" : "far";
+  });
+  return bands;
 }
 
 /** The other buildings a town may have besides its power station and domes. */
@@ -143,7 +174,8 @@ export function generateWorld(cfg: LocalMapConfig): World {
   }
 
   connectTowns(map, towns);
-  return { map, towns, targets: placeTargets(map, towns, cfg) };
+  const bands = townBands(map, towns, cfg);
+  return { map, towns, targets: placeTargets(map, towns, bands, cfg), bands };
 }
 
 /** Repeatedly opens the cheapest route from the connected towns to one that is cut off. */
@@ -219,7 +251,7 @@ function cheapestPath(map: LocalMap, sources: Cell[], isGoal: (x: number, y: num
  * station, its hunter, its domes and a few other buildings (#62), then each network's garrison
  * (design-notes 4.4) is hidden in its domes.
  */
-function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target[] {
+function placeTargets(map: LocalMap, towns: Town[], bands: readonly Band[], cfg: LocalMapConfig): Target[] {
   const rng = createRng(cfg.worldSeed * 6151 + 1);
   const targets: Target[] = [];
   // Where a hunter may stand: the terrain no longer changes once the towns are joined, so this
@@ -256,8 +288,26 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
       placed += 1;
     }
   }
-  const withGarrisons = [...placeParts(map, towns, targets, cfg), ...placeDefenders(map, towns, targets, cfg)];
-  return rollSupplies([...withGarrisons, ...placePatrollers(map, towns, withGarrisons, cfg)], cfg);
+  const withGarrisons = [...placeParts(map, towns, targets, bands, cfg), ...placeDefenders(map, towns, targets, cfg)];
+  return rollSupplies(harden([...withGarrisons, ...placePatrollers(map, towns, withGarrisons, cfg)], bands, cfg), cfg);
+}
+
+/**
+ * Hardened enemies (design-notes 4.5): further from the start, hunters jam and defenders carry
+ * point defence. None near; each with `middleHardenChance` in the middle; all in the far towns,
+ * where some defenders jam as well. Patrollers roam between towns and are never hardened. Drawn
+ * from its own stream, so nothing else moves.
+ */
+function harden(targets: readonly Target[], bands: readonly Band[], cfg: LocalMapConfig): Target[] {
+  const rng = createRng(cfg.worldSeed * 7393 + 13);
+  return targets.map((t) => {
+    if (t.kind !== "hunter" && t.kind !== "defender") return t;
+    const band = bands[t.network];
+    const hardened = band === "far" || (band === "middle" && rng() < cfg.middleHardenChance);
+    if (!hardened) return t;
+    if (t.kind === "hunter") return { ...t, defences: { jammer: true } };
+    return { ...t, defences: { pointDefence: true, jammer: band === "far" && rng() < cfg.farBothChance } };
+  });
 }
 
 /**
@@ -270,7 +320,7 @@ function placeTargets(map: LocalMap, towns: Town[], cfg: LocalMapConfig): Target
 function rollSupplies(targets: readonly Target[], cfg: LocalMapConfig): Target[] {
   const rng = createRng(cfg.worldSeed * 3571 + 9);
   return targets.map((t) => {
-    const rolls = cfg.supplyChances[t.kind] ?? {};
+    const rolls = { ...cfg.supplyChances[t.kind], ...(t.defences ? cfg.hardenedSupplyChances[t.kind] : {}) };
     const supplies: Supply[] = [];
     for (const supply of SUPPLIES) {
       const roll = rolls[supply];
@@ -292,7 +342,7 @@ function rollSupplies(targets: readonly Target[], cfg: LocalMapConfig): Target[]
  * If too few buildings qualify, fewer parts are placed; the tests hold the default world to the
  * full set.
  */
-function placeParts(map: LocalMap, towns: Town[], targets: readonly Target[], cfg: LocalMapConfig): Target[] {
+function placeParts(map: LocalMap, towns: Town[], targets: readonly Target[], bands: readonly Band[], cfg: LocalMapConfig): Target[] {
   const rng = createRng(cfg.worldSeed * 5227 + 11);
   const blocked = new Set(targets.filter((t) => !isEnemyKind(t.kind)).map((t) => cellKey(map, t.col, t.row)));
   const walkable = reachableMask(towns[cfg.startTown], map, blocked);
@@ -308,9 +358,12 @@ function placeParts(map: LocalMap, towns: Town[], targets: readonly Target[], cf
   const perNetwork = new Map<number, number>();
   const parts = new Map<number, number>(); // target index to part
   while (parts.size < cfg.partCount && candidates.length > 0) {
-    const total = candidates.reduce((sum, c) => sum + c.weight, 0);
+    // The first few go to far towns (design-notes 4.5), so the deepest towns are worth the trip.
+    const far = candidates.filter((c) => bands[c.network] === "far");
+    const pool = parts.size < cfg.partsFarMin && far.length > 0 ? far : candidates;
+    const total = pool.reduce((sum, c) => sum + c.weight, 0);
     let pick = rng() * total;
-    const chosen = candidates.find((c) => (pick -= c.weight) < 0) ?? candidates[candidates.length - 1];
+    const chosen = pool.find((c) => (pick -= c.weight) < 0) ?? pool[pool.length - 1];
     parts.set(chosen.index, parts.size);
     const count = (perNetwork.get(chosen.network) ?? 0) + 1;
     perNetwork.set(chosen.network, count);
