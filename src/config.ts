@@ -240,10 +240,10 @@ export const config = {
     // energy on the chase; the defender is defensive, built heavy. The patroller holds nothing: its
     // guns are not salvage, and it is killed to stop it fetching help, not for what it carries.
     supplyChances: {
-      dome: { energy: { max: 2, chance: 0.15 }, armour: { max: 2, chance: 0.15 }, missiles: { min: 1, max: 3, chance: 0.4 } },
+      dome: { energy: { max: 2, chance: 0.25 }, armour: { max: 2, chance: 0.15 }, missiles: { min: 1, max: 3, chance: 0.4 } },
       mine: { energy: { max: 2, chance: 0.3 }, armour: { max: 2, chance: 0.6 }, missiles: { max: 2, chance: 0.3 } },
-      commsCentre: { energy: { max: 2, chance: 0.7 }, armour: { max: 2, chance: 0.1 }, missiles: { max: 2, chance: 0.1 } },
-      hunter: { energy: { max: 2, chance: 0.4 }, armour: { max: 1, chance: 0.25 }, missiles: { max: 2, chance: 0.6 } },
+      commsCentre: { energy: { max: 3, chance: 0.7 }, armour: { max: 2, chance: 0.1 }, missiles: { max: 2, chance: 0.1 } },
+      hunter: { energy: { max: 2, chance: 0.5 }, armour: { max: 1, chance: 0.25 }, missiles: { max: 2, chance: 0.6 } },
       defender: { energy: { max: 1, chance: 0.2 }, armour: { max: 2, chance: 0.55 }, missiles: { max: 1, chance: 0.4 } },
     },
     // Parts (design-notes 4.4): a fixed set placed over the world, not rolled. Placeholders.
