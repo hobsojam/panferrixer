@@ -216,7 +216,8 @@ export const config = {
     hitsPerPlate: 3, // design-notes 4.9: each shield plate absorbs three missile hits
     hunterEngageRange: 6, // in map cells: an alerted hunter opens fire when the robot is this close
     // Placeholders for hunter behaviour (design-notes 4.10 and 4.14). Tuned by playtest.
-    hunterSpeed: 2, // cells per second when it moves
+    // Speeds fit the stances (#117, design-notes 4.10). The robot walks faster than all but a patroller running for help.
+    hunterSpeed: 2.5, // cells per second when it moves: aggressive, it closes in faster than the others
     // Attack pacing and turn-taking (design-notes 4.10): the player must always have time to strike back.
     attackBreatherSeconds: 3, // after any incoming attack, no enemy may start one: time to open Missile, which stops time
     hunterMagazineAttacks: 2, // attacks a hunter makes before withdrawing to rearm
@@ -227,7 +228,7 @@ export const config = {
     hunterSightCells: 5, // just inside the engagement range
     hunterHoldCells: 4, // an alerted hunter closes to this range, then holds while it attacks: the aggression dial
     // Defenders (design-notes 4.4 and 4.10): woken out of their dome, they guard it. Placeholders.
-    defenderSpeed: 2, // cells per second
+    defenderSpeed: 1.5, // cells per second: heavy and built to guard, so it does not chase far
     defenderGuardCells: 12, // the guard area: an awake defender sees and chases the robot only this close to its post. Covers the missile's reach across the local view, so a dome cannot be opened from outside it
     // Patrollers (#66, design-notes 4.10): they walk a wide beat, come to look at disturbances, and
     // on seeing the robot run to the nearest armed enemy for help. Lightly armed. Placeholders.
