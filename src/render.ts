@@ -1,5 +1,5 @@
 import type { Config } from "./config";
-import { ART, hasArt, strokeArt } from "./building-art";
+import { ART, fittingStrokes, hasArt, strokeArt, type Fittings } from "./building-art";
 import { drawDust, drawExplosion } from "./explosion";
 import type { TargetKind } from "./local-map";
 import { jamLevel } from "./flight";
@@ -15,7 +15,8 @@ export function render(
   state: FlightState,
   cfg: Config,
   targetKind: TargetKind | null = null,
-  shielded: boolean = false
+  shielded: boolean = false,
+  fittings: Fittings = {}
 ): void {
   const { width: w, height: h } = cfg.canvas;
   const horizonY = h * 0.55;
@@ -41,7 +42,7 @@ export function render(
   }
 
   if (state.phase === "terminal" || state.phase === "hit" || state.phase === "shotDown") {
-    drawTarget(ctx, state, cfg, horizonY, targetKind, shielded);
+    drawTarget(ctx, state, cfg, horizonY, targetKind, shielded, fittings);
   }
 
   if (state.phase === "terminal") {
@@ -194,7 +195,8 @@ function drawTarget(
   cfg: Config,
   horizonY: number,
   kind: TargetKind | null,
-  shielded: boolean
+  shielded: boolean,
+  fittings: Fittings
 ): void {
   const { centerX, centerY, size } = targetAnchor(state, cfg, horizonY);
   // A deflected hit leaves the building standing, so only an unshielded hit makes it collapse.
@@ -213,6 +215,8 @@ function drawTarget(
     ctx.save();
     ctx.globalAlpha = fade;
     strokeArt(ctx, ART[kind].full, centerX + shake, horizonY, size / 2, cfg.colors.target, 2, 8);
+    // A hardened enemy's turret and mast (#112), in the tracer colour so they stand out.
+    strokeArt(ctx, fittingStrokes(ART[kind].full, fittings), centerX + shake, horizonY, size / 2, cfg.colors.tracer, 2, 8);
     ctx.restore();
     return;
   }

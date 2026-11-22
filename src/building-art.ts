@@ -415,3 +415,63 @@ export function strokeArt(
   }
   ctx.restore();
 }
+
+/** What a hardened enemy carries (design-notes 4.5): either or both. */
+export interface Fittings {
+  pointDefence?: boolean;
+  jammer?: boolean;
+}
+
+/** The highest point of the art near `x`, where a fitting is mounted. */
+function topNear(strokes: Record<string, Stroke>, x: number): number {
+  let top = 0;
+  for (const stroke of Object.values(strokes)) for (const [px, py] of stroke) if (Math.abs(px - x) <= 0.25) top = Math.min(top, py);
+  return top < 0 ? top : -1;
+}
+
+/**
+ * The fittings that mark a hardened enemy (#112), added on top of its art so a defended machine
+ * reads as one on the map and in the flight. Point defence is a turret with twin barrels, on the
+ * left and pointing outward; a jammer is a mast with signal arcs, in the middle. In the same box as the art, rising
+ * above it.
+ */
+export function fittingStrokes(strokes: Record<string, Stroke>, fittings: Fittings): Record<string, Stroke> {
+  const out: Record<string, Stroke> = {};
+  if (fittings.pointDefence) {
+    const x = -0.45;
+    const y = topNear(strokes, x);
+    out.turret = closed([
+      [x - 0.2, y],
+      [x - 0.16, y - 0.18],
+      [x + 0.16, y - 0.18],
+      [x + 0.2, y],
+    ]);
+    out.barrel1 = [
+      [x + 0.02, y - 0.16],
+      [x - 0.32, y - 0.48],
+    ];
+    out.barrel2 = [
+      [x - 0.1, y - 0.14],
+      [x - 0.44, y - 0.46],
+    ];
+  }
+  if (fittings.jammer) {
+    const x = 0.1;
+    const y = topNear(strokes, x);
+    const tip = y - 0.55;
+    out.mast = [
+      [x, y],
+      [x, tip],
+    ];
+    out.mastFoot = [
+      [x - 0.12, y],
+      [x, y - 0.2],
+      [x + 0.12, y],
+    ];
+    for (const [i, r] of [0.14, 0.26].entries()) {
+      out[`waveL${i}`] = arc(x, tip, r, r, Math.PI * 0.75, Math.PI * 1.25, 4);
+      out[`waveR${i}`] = arc(x, tip, r, r, -Math.PI * 0.25, Math.PI * 0.25, 4);
+    }
+  }
+  return out;
+}
