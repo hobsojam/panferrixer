@@ -88,16 +88,16 @@ describe("town walls", () => {
           !world.towns.some((o) => inTown(o, cfg.townRadiusCols * cfg.wallReach, cfg.townRadiusRows * cfg.wallReach, x, y));
         for (const centre of wall.gaps) {
           // Walk out from this gap alone: never back through the town, which would reach the other gap.
-          const start = ringOf(world, town).filter((c) => {
+          const start: Cell[] = ringOf(world, town).filter((c) => {
             const b = bearingFrom(t, cfg.townRadiusCols, cfg.townRadiusRows, c.x, c.y);
             return inGap(b, centre, wall.gapWidth) && map.tiers[c.y][c.x] !== 2;
           });
           expect(start.length).toBeGreaterThan(0);
           const seen = new Set(start.map((c) => cellKey(map, c.x, c.y)));
-          const queue = [...start];
+          const queue: Cell[] = [...start];
           let out = false;
           for (let head = 0; head < queue.length && !out; head++) {
-            const c = queue[head];
+            const c: Cell = queue[head];
             if (beyond(c.x, c.y)) out = true;
             for (const [dx, dy] of OFFSETS) {
               const x = c.x + dx;
