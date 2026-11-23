@@ -17,7 +17,9 @@ The playable prototype currently includes:
 - **The dashboard:** the robot's state-of-mind trace, energy and armour displays, action
   panels, a map, and synthesised sound effects.
 - **One generated world:** ten towns, each the centre of a network with its power station,
-  domes and other buildings, joined by valleys and cut up by impassable high ground.
+  domes and other buildings, joined by valleys and cut up by impassable high ground. Most
+  towns sit inside a mountain arc with one or two gaps, the only ways in for the robot and
+  enemies alike; a couple stay open.
 - **Maps and movement:** local and full-map views, plus pathfinding that walks the robot to a
   chosen reachable cell. Intact buildings block the way; ruins do not.
 - **Missile strikes:** targeting nearby buildings and enemies, then a forward-looking

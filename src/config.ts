@@ -262,6 +262,11 @@ export const config = {
     townRadiusCols: 7,
     townRadiusRows: 4,
     smoothingPasses: 2,
+    // Town walls (#89): most towns get a mountain arc round them with 1 or 2 gaps. Placeholders.
+    wallReach: 1.3, // the ring runs out to 1.3 times the town's radii: more than one step of a walk can cross
+    wallShare: 0.67, // about two thirds of the ring is wall
+    openTownShare: 0.2, // two of the ten towns stay open
+    twoGapChance: 0.5, // one gap makes a fortress; two give a back door
     valleyBelow: 0.46,
     highAbove: 0.54,
     domesPerTown: 4, // #62: enough for a full garrison of four

@@ -13,6 +13,11 @@ export interface LocalMapConfig {
   townRadiusCols: number; // half-size of a town's area, in cells
   townRadiusRows: number;
   smoothingPasses: number;
+  // Town walls (#89): a ring of high ground just outside most towns, broken by 1 or 2 gaps.
+  wallReach: number; // the ring runs from the town's edge out to this many times its radii
+  wallShare: number; // the share of the ring that is wall; the rest is split between the gaps
+  openTownShare: number; // this share of the towns has no wall at all
+  twoGapChance: number; // a walled town has two gaps with this chance, otherwise one
   valleyBelow: number; // raw height below this is a valley
   highAbove: number; // raw height above this is high ground
   domesPerTown: number; // at least as many as the most defenders a network can draw (design-notes 4.4)
@@ -105,6 +110,7 @@ export interface World {
   towns: Town[];
   targets: Target[];
   bands: Band[]; // per town (network)
+  walls: (TownWall | null)[]; // per town: its wall's gaps, or null for an open town (#89)
 }
 
 /**
@@ -146,10 +152,27 @@ export function inTown(town: Town, radiusCols: number, radiusRows: number, x: nu
 }
 
 /**
+ * True when (x, y) is in the ring just outside a town where its wall stands (#89): beyond the
+ * town's edge, out to `reach` times its radii. Whether a ring cell is wall or gap is the map's.
+ */
+export function inWallRing(town: Town, radiusCols: number, radiusRows: number, reach: number, x: number, y: number): boolean {
+  const dx = (x - town.x) / radiusCols;
+  const dy = (y - town.y) / radiusRows;
+  const d = dx * dx + dy * dy;
+  return d > 1 && d <= reach * reach;
+}
+
+/** The bearing of a cell from a town's centre, measured on the town's ellipse: -PI..PI. */
+export function bearingFrom(town: Town, radiusCols: number, radiusRows: number, x: number, y: number): number {
+  return Math.atan2((y - town.y) / radiusRows, (x - town.x) / radiusCols);
+}
+
+/**
  * The whole map: one terrain grid with a town at each network node. Deterministic
  * from the world seed, so the same world is rebuilt every time it is needed.
- * Towns are valley or ground. Afterwards the fewest high-ground cells needed are
- * opened so every town can be walked to from every other.
+ * Towns are valley or ground. Most are then walled (#89): a ring of high ground with 1 or
+ * 2 gaps. Afterwards the fewest high-ground cells needed are opened so every town can be
+ * walked to from every other, and every gap leads out, without breaking a wall.
  */
 export function generateWorld(cfg: LocalMapConfig): World {
   const rng = createRng(cfg.worldSeed * 7919);
@@ -174,13 +197,126 @@ export function generateWorld(cfg: LocalMapConfig): World {
     }
   }
 
-  connectTowns(map, towns);
+  const walls = buildWalls(map, towns, cfg);
+  connectTowns(map, towns, walls);
+  openGaps(map, towns, walls, cfg);
   const bands = townBands(map, towns, cfg);
-  return { map, towns, targets: placeTargets(map, towns, bands, cfg), bands };
+  const byTown = towns.map((_, i) => walls.towns.find((w) => w.town === i) ?? null);
+  return { map, towns, targets: placeTargets(map, towns, bands, cfg), bands, walls: byTown };
 }
 
-/** Repeatedly opens the cheapest route from the connected towns to one that is cut off. */
-function connectTowns(map: LocalMap, towns: Town[]): void {
+/** A walled town's gaps (#89): the bearing each is centred on, and how wide each is, in radians. */
+export interface TownWall {
+  town: number;
+  gaps: number[];
+  gapWidth: number;
+}
+
+/** The wall cells of every walled town, and each walled town's gaps. */
+interface Walls {
+  cells: Set<number>;
+  towns: TownWall[];
+}
+
+/** True when a bearing lies inside a gap centred on `centre`. */
+export function inGap(bearing: number, centre: number, width: number): boolean {
+  const off = Math.abs(((bearing - centre + 3 * Math.PI) % (2 * Math.PI)) - Math.PI);
+  return off <= width / 2;
+}
+
+/**
+ * Town walls (#89, design-notes 4.7): every town but `openTownShare` of them, chosen at random,
+ * gets a ring of high ground just outside its area, `wallShare` of the way round. The rest of the
+ * ring is 1 or 2 gaps, cleared to ground, so each network has its own shape and its gaps are
+ * chokepoints for the robot and enemies alike. A second gap sits roughly opposite the first, as a
+ * back door. A gap is placed where it opens onto the map, not off its edge. The ring is thicker
+ * than one step of a walk can cross, so the wall has no diagonal leaks. Drawn from its own stream,
+ * so the rest of the terrain does not move when the wall rules change.
+ */
+function buildWalls(map: LocalMap, towns: readonly Town[], cfg: LocalMapConfig): Walls {
+  const rng = createRng(cfg.worldSeed * 8803 + 17);
+  const order = towns.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  const open = new Set(order.slice(0, Math.round(towns.length * cfg.openTownShare)));
+  const walls: Walls = { cells: new Set(), towns: [] };
+  towns.forEach((town, index) => {
+    if (open.has(index)) return;
+    const ring: Cell[] = [];
+    const reachCols = Math.ceil(cfg.townRadiusCols * cfg.wallReach);
+    const reachRows = Math.ceil(cfg.townRadiusRows * cfg.wallReach);
+    for (let y = Math.max(0, town.y - reachRows); y <= Math.min(map.rows - 1, town.y + reachRows); y++) {
+      for (let x = Math.max(0, town.x - reachCols); x <= Math.min(map.cols - 1, town.x + reachCols); x++) {
+        if (inWallRing(town, cfg.townRadiusCols, cfg.townRadiusRows, cfg.wallReach, x, y)) ring.push({ x, y });
+      }
+    }
+    const count = rng() < cfg.twoGapChance ? 2 : 1;
+    const gapWidth = ((1 - cfg.wallShare) * 2 * Math.PI) / count;
+    const bearing = (c: Cell) => bearingFrom(town, cfg.townRadiusCols, cfg.townRadiusRows, c.x, c.y);
+    // A gap must open onto the map: at least a few of its ring cells away from the map's edge.
+    const opensOut = (centre: number) =>
+      ring.filter((c) => inGap(bearing(c), centre, gapWidth) && c.x > 0 && c.y > 0 && c.x < map.cols - 1 && c.y < map.rows - 1).length >= 3;
+    const gaps: number[] = [];
+    for (let g = 0; g < count; g++) {
+      let centre = 0;
+      for (let tries = 0; tries < 20; tries++) {
+        centre = g === 0 ? rng() * 2 * Math.PI - Math.PI : gaps[0] + Math.PI + (rng() - 0.5) * (Math.PI / 2);
+        if (opensOut(centre)) break;
+      }
+      gaps.push(centre);
+    }
+    for (const c of ring) {
+      if (gaps.some((g) => inGap(bearing(c), g, gapWidth))) {
+        if (map.tiers[c.y][c.x] === 2) map.tiers[c.y][c.x] = 1;
+      } else {
+        map.tiers[c.y][c.x] = 2;
+        walls.cells.add(c.y * map.cols + c.x);
+      }
+    }
+    walls.towns.push({ town: index, gaps, gapWidth });
+  });
+  return walls;
+}
+
+/**
+ * Every gap leads somewhere (#89): from the gap's outer cells, the cheapest way out to open ground
+ * clear of every town and wall ring is opened, if there is not one already. It may not run back
+ * through its own town, or the far gap would do the work and this one would open onto a dead end.
+ */
+function openGaps(map: LocalMap, towns: readonly Town[], walls: Walls, cfg: LocalMapConfig): void {
+  const key = (x: number, y: number) => y * map.cols + x;
+  const nearTown = (x: number, y: number) =>
+    towns.some((t) => inTown(t, cfg.townRadiusCols * cfg.wallReach, cfg.townRadiusRows * cfg.wallReach, x, y));
+  for (const wall of walls.towns) {
+    const town = towns[wall.town];
+    const blocked = new Set(walls.cells);
+    for (let y = town.y - cfg.townRadiusRows; y <= town.y + cfg.townRadiusRows; y++) {
+      for (let x = town.x - cfg.townRadiusCols; x <= town.x + cfg.townRadiusCols; x++) {
+        if (x >= 0 && y >= 0 && x < map.cols && y < map.rows && inTown(town, cfg.townRadiusCols, cfg.townRadiusRows, x, y)) blocked.add(key(x, y));
+      }
+    }
+    for (const centre of wall.gaps) {
+      const sources: Cell[] = [];
+      for (let y = 0; y < map.rows; y++) {
+        for (let x = 0; x < map.cols; x++) {
+          if (!inWallRing(town, cfg.townRadiusCols, cfg.townRadiusRows, cfg.wallReach, x, y) || blocked.has(key(x, y))) continue;
+          if (inGap(bearingFrom(town, cfg.townRadiusCols, cfg.townRadiusRows, x, y), centre, wall.gapWidth)) sources.push({ x, y });
+        }
+      }
+      if (sources.length === 0) continue;
+      const path = cheapestPath(map, sources, (x, y) => !nearTown(x, y) && map.tiers[y][x] !== 2, blocked);
+      for (const c of path ?? []) if (map.tiers[c.y][c.x] === 2) map.tiers[c.y][c.x] = 1;
+    }
+  }
+}
+
+/**
+ * Repeatedly opens the cheapest route from the connected towns to one that is cut off. Wall
+ * cells are never opened (#89): routes come in through the gaps.
+ */
+function connectTowns(map: LocalMap, towns: Town[], walls: Walls): void {
   const key = (x: number, y: number) => y * map.cols + x;
   for (;;) {
     const reached = reachableFrom(towns[0], map);
@@ -189,7 +325,7 @@ function connectTowns(map: LocalMap, towns: Town[]): void {
 
     const sources: Cell[] = [...reached].map((k) => ({ x: k % map.cols, y: Math.floor(k / map.cols) }));
     const goals = new Set(unreached.map((t) => key(t.x, t.y)));
-    const path = cheapestPath(map, sources, (x, y) => goals.has(key(x, y)));
+    const path = cheapestPath(map, sources, (x, y) => goals.has(key(x, y)), walls.cells);
     if (path === null) return;
     for (const c of path) {
       if (map.tiers[c.y][c.x] === 2) map.tiers[c.y][c.x] = 1;
@@ -199,9 +335,10 @@ function connectTowns(map: LocalMap, towns: Town[]): void {
 
 /**
  * Least high-ground route from any source cell to a goal cell. Entering high ground
- * costs one, anything else costs nothing. Returns the cells from source to goal.
+ * costs one, anything else costs nothing; `never` cells are not entered at all. Returns
+ * the cells from source to goal.
  */
-function cheapestPath(map: LocalMap, sources: Cell[], isGoal: (x: number, y: number) => boolean): Cell[] | null {
+function cheapestPath(map: LocalMap, sources: Cell[], isGoal: (x: number, y: number) => boolean, never: ReadonlySet<number> = new Set()): Cell[] | null {
   const key = (x: number, y: number) => y * map.cols + x;
   const dist = new Map<number, number>();
   const prev = new Map<number, number>();
@@ -233,6 +370,7 @@ function cheapestPath(map: LocalMap, sources: Cell[], isGoal: (x: number, y: num
         const ny = cell.y + dy;
         if (nx < 0 || ny < 0 || nx >= map.cols || ny >= map.rows) continue;
         const nk = key(nx, ny);
+        if (never.has(nk)) continue;
         const cost = map.tiers[ny][nx] === 2 ? 1 : 0;
         const nd = d + cost;
         if (!dist.has(nk) || dist.get(nk)! > nd) {
