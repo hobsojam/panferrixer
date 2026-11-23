@@ -1154,6 +1154,26 @@ export function hunterInRange(s: DashboardState, world: World, range: number): n
 }
 
 
+/** A network as the full map marks it (#90): at its power station, and whether its power is cut. */
+export interface NetworkMarker {
+  network: number;
+  col: number;
+  row: number;
+  down: boolean;
+}
+
+/**
+ * The full map's network markers (#90): one per network, at its power station. The station is a
+ * real place the robot walks to and cuts with Grid Disable, and it can never be destroyed, so the
+ * marker never goes stale. A network without a station is not marked.
+ */
+export function networkMarkers(s: DashboardState, world: World): NetworkMarker[] {
+  return world.towns.flatMap((_, network) => {
+    const station = world.targets.find((t) => t.kind === "power" && t.network === network);
+    return station ? [{ network, col: station.col, row: station.row, down: isSuppressed(s, network) }] : [];
+  });
+}
+
 /** Grid disable is ready once its cooldown has passed. */
 export function gridDisableReady(state: DashboardState): boolean {
   return state.time >= state.gridReadyAt;

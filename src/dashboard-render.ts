@@ -1,7 +1,7 @@
 import { cracksOn, plateToMend, standing } from "./armour";
 import { ART, fittingStrokes, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
-import { AVAILABLE_VERBS, VERB_GRID, blipStrength, buildingCells, gridDisableReady, isHidden, isInsideBuilding, isLow, isPaused, isResting, isSuppressed, positionOf, ringReach, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
+import { AVAILABLE_VERBS, VERB_GRID, blipStrength, buildingCells, gridDisableReady, isHidden, isInsideBuilding, isLow, isPaused, isResting, isSuppressed, networkMarkers, positionOf, ringReach, routeTo, selectedVerb, worldFor, type DashboardState, type World, type Verb } from "./dashboard";
 import type { Target } from "./local-map";
 import { drawCracks, tracePlate } from "./plates";
 import { drawGlow } from "./render";
@@ -401,10 +401,11 @@ function drawPulse(
 }
 
 /**
- * Full zoom: the whole world scaled into the panel, for planning and travel. Networks are
- * rings that show whether their power is cut; buildings and enemies are not drawn (only the
- * local map shows them). Salvage blips stay, so the player can remember where to go.
- * The robot is a dot at its real position. Nothing is centred or scrolled.
+ * Full zoom: the whole world scaled into the panel, for planning and travel. Only high ground is
+ * drawn, so the barriers read clearly (#90). Each network is marked by its power station, which
+ * shows whether its power is cut; other buildings and enemies are not drawn (only the local map
+ * shows them). Salvage blips stay, so the player can remember where to go. The robot is a dot at
+ * its real position. Nothing is centred or scrolled.
  */
 function drawFullMap(
   ctx: CanvasRenderingContext2D,
@@ -424,31 +425,31 @@ function drawFullMap(
 
   for (let row = 0; row < map.rows; row++) {
     for (let col = 0; col < map.cols; col++) {
-      const tier = map.tiers[row][col];
-      if (tier === 0) continue;
-      ctx.globalAlpha = tier === 2 ? 0.45 : 0.15;
+      // Valleys and ground are left blank: at a few pixels a cell they were noise over the high ground.
+      if (map.tiers[row][col] !== 2) continue;
+      ctx.globalAlpha = FULL_MAP_HIGH_GROUND_ALPHA;
       ctx.fillStyle = c.panelDim;
       ctx.fillRect(x + col * cellW, y + row * cellH, cellW, cellH);
     }
   }
   ctx.globalAlpha = 1;
 
-  // One ring per network (a network is a town), drawn at the town's real extent so it reads
-  // as a place the robot can walk into. Its buildings and enemies are local-map detail.
-  // A network whose power is cut shows a dashed ring in the shield colour until it comes back.
-  world.towns.forEach((town, network) => {
-    const [tx, ty] = toScreen(town.x, town.y);
-    const down = isSuppressed(state, network);
-    ctx.strokeStyle = down ? c.shield : c.text;
-    ctx.globalAlpha = down ? 1 : 0.7;
+  // Each network is marked by its power station (#90): a real place, never destroyed. While its
+  // power is cut the station is drawn in the shield colour inside a dashed ring, until it comes back.
+  const iconHalf = FULL_MAP_STATION_HALF_SIZE;
+  for (const m of networkMarkers(state, world)) {
+    const [mx, my] = toScreen(m.col, m.row);
+    const color = m.down ? c.shield : c.text;
+    strokeArt(ctx, ART.power.simple, mx, my + iconHalf / 2, iconHalf, color, 1, 0);
+    if (!m.down) continue;
+    ctx.strokeStyle = c.shield;
     ctx.lineWidth = 1;
-    ctx.setLineDash(down ? [3, 3] : []);
+    ctx.setLineDash([3, 3]);
     ctx.beginPath();
-    ctx.ellipse(tx, ty, world.townRadiusCols * cellW, world.townRadiusRows * cellH, 0, 0, Math.PI * 2);
+    ctx.arc(mx, my, iconHalf * 2, 0, Math.PI * 2);
     ctx.stroke();
-  });
-  ctx.globalAlpha = 1;
-  ctx.setLineDash([]);
+    ctx.setLineDash([]);
+  }
 
   if (isPaused(state)) drawTimeStopped(ctx, x, y, w, h, cfg);
 
@@ -490,6 +491,12 @@ function drawCross(ctx: CanvasRenderingContext2D, cx: number, cy: number, color:
     ctx.stroke();
   });
 }
+
+/** High ground on the full map: strong enough to read as the barrier, under the markers. */
+const FULL_MAP_HIGH_GROUND_ALPHA = 0.6;
+
+/** Half the width of a power-station marker on the full map, in pixels: a cell or two across. */
+const FULL_MAP_STATION_HALF_SIZE = 5;
 
 /**
  * The robot's marker on the full map, as a fraction of its local-view size. A full-map cell is
