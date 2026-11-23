@@ -39,7 +39,7 @@ export interface LocalMapConfig {
   patrolBeatSpacing: number; // waypoints on one loop are at least this many cells apart
   startTown: number; // the town where the robot begins
   patrolStartClearCells: number; // no beat comes this close to the start town's centre
-  haulersPerTown: number; // #67: each network's haulers, carrying between its power station, mines and domes
+  haulersPerTown: number; // #67, #121: each network's haulers, which start there and carry between networks
   // Difficulty by distance (design-notes 4.5): towns ranked by walking distance from the start town
   // fall into bands; further bands hold hardened hunters (jamming) and defenders (point defence).
   bandShares: { near: number; middle: number }; // the nearest share of towns, then the next; the rest are far
@@ -87,8 +87,9 @@ export interface Target {
   supplies: Supply[]; // one entry per unit, hidden in the building or enemy; found only once it is destroyed
   part?: number; // which part (0 to partCount - 1) lies under the building, if any; hidden like supplies
   network: number; // the town (network) it was placed in. Towns can overlap, so position alone does not say
-  home?: number; // a defender's dome (target index); its col and row are the free cell beside it, its post
-  beat?: Cell[]; // a patroller's loop of waypoints, or a hauler's route; its col and row are the first, where it starts
+  home?: number; // a defender's dome, or the building a hauler starts loading at (target index)
+  beat?: Cell[]; // a patroller's loop of waypoints; its col and row are the first, where it starts
+  dock?: Cell; // a power station's, mine's or dome's loading cell, where haulers stop (#121); none if it has no free side
   defences?: FlightDefences; // a hardened enemy's defences against a missile; none for the standard types
 }
 
@@ -111,6 +112,7 @@ export interface World {
   targets: Target[];
   bands: Band[]; // per town (network)
   walls: (TownWall | null)[]; // per town: its wall's gaps, or null for an open town (#89)
+  neighbours: number[][]; // per town: the towns a hauler carries to from it, in ascending order (#121)
 }
 
 /**
@@ -202,7 +204,7 @@ export function generateWorld(cfg: LocalMapConfig): World {
   openGaps(map, towns, walls, cfg);
   const bands = townBands(map, towns, cfg);
   const byTown = towns.map((_, i) => walls.towns.find((w) => w.town === i) ?? null);
-  return { map, towns, targets: placeTargets(map, towns, bands, cfg), bands, walls: byTown };
+  return { map, towns, targets: placeTargets(map, towns, bands, cfg), bands, walls: byTown, neighbours: townNeighbours(map, towns, cfg) };
 }
 
 /** A walled town's gaps (#89): the bearing each is centred on, and how wide each is, in radians. */
@@ -429,8 +431,10 @@ function placeTargets(map: LocalMap, towns: Town[], bands: readonly Band[], cfg:
   }
   const withGarrisons = [...placeParts(map, towns, targets, bands, cfg), ...placeDefenders(map, towns, targets, cfg)];
   const withPatrollers = [...withGarrisons, ...placePatrollers(map, towns, withGarrisons, cfg)];
-  // Haulers come last, and their cargo is rolled after everything else's, so no other target moves or changes.
-  return rollSupplies(harden([...withPatrollers, ...placeHaulers(map, towns, withPatrollers, cfg)], bands, cfg), cfg);
+  // Docks and haulers come last, and the haulers' cargo is rolled after everything else's, so no
+  // other target moves or changes.
+  const docked = placeDocks(map, towns, withPatrollers);
+  return rollSupplies(harden([...docked, ...placeHaulers(docked, cfg)], bands, cfg), cfg);
 }
 
 /**
@@ -584,42 +588,84 @@ function loopStaysClear(beat: readonly Cell[], map: LocalMap, start: Cell, clear
   return legs.every(({ from, to }) => (findRoute(from, to, map) ?? []).every(clear));
 }
 
-/** The buildings a hauler carries between (#67, design-notes 2.6): raw material from mines, power pods from the station, to the domes. */
-const HAULER_STOPS: readonly TargetKind[] = ["power", "mine", "dome"];
+/** The buildings a hauler stops at (#67, design-notes 2.6): it loads raw material at mines and power pods at the station, and unloads at the domes. */
+export const HAULER_PICKUPS: readonly TargetKind[] = ["power", "mine"];
+const HAULER_STOPS: readonly TargetKind[] = [...HAULER_PICKUPS, "dome"];
 
 /**
- * The haulers (#67): each network gets `haulersPerTown`, each on a route round its network's power
- * station, mines and domes. A stop is the free cell beside its building nearest the town centre:
- * open ground the robot can reach (so a hauler can be chased) and no other target's cell. The stops
- * are ordered round the town centre so the route does not cross itself; a second hauler in a network
- * starts further round the same loop. A network with fewer than two stops gets no hauler. Nothing is
- * drawn at random, so no other placement moves.
+ * Docks (#121): each power station, mine and dome gets the free cell beside it nearest its town's
+ * centre, where a hauler loads or unloads. It is open ground the robot can reach (so a hauler can be
+ * chased there), no other target's cell and no other dock. A building with no such side has no dock,
+ * and haulers pass it by. Nothing is drawn at random, so no other placement moves.
  */
-function placeHaulers(map: LocalMap, towns: Town[], targets: readonly Target[], cfg: LocalMapConfig): Target[] {
+function placeDocks(map: LocalMap, towns: Town[], targets: readonly Target[]): Target[] {
   const blocked = new Set(targets.filter((t) => !isEnemyKind(t.kind)).map((t) => cellKey(map, t.col, t.row)));
   const reached = reachableFrom(towns[0], map, blocked);
-  const occupied = new Set(targets.map((t) => cellKey(map, t.col, t.row)));
-  const haulers: Target[] = [];
-  towns.forEach((town, network) => {
-    const near = (a: Cell, b: Cell) => Math.hypot(a.x - town.x, a.y - town.y) - Math.hypot(b.x - town.x, b.y - town.y);
-    const stops: Cell[] = [];
-    for (const t of targets) {
-      if (t.network !== network || !HAULER_STOPS.includes(t.kind)) continue;
-      const beside = OFFSETS.map(([dx, dy]) => ({ x: t.col + dx, y: t.row + dy }))
-        .filter((c) => reached.has(cellKey(map, c.x, c.y)) && !occupied.has(cellKey(map, c.x, c.y)))
-        .filter((c) => !stops.some((s) => s.x === c.x && s.y === c.y))
-        .sort(near)[0];
-      if (beside) stops.push(beside);
-    }
-    if (stops.length < 2) return;
-    stops.sort((a, b) => Math.atan2(a.y - town.y, a.x - town.x) - Math.atan2(b.y - town.y, b.x - town.x));
-    for (let h = 0; h < cfg.haulersPerTown; h++) {
-      const shift = Math.floor((h * stops.length) / cfg.haulersPerTown);
-      const route = [...stops.slice(shift), ...stops.slice(0, shift)];
-      haulers.push({ col: route[0].x, row: route[0].y, kind: "hauler", supplies: [], network, beat: route });
-    }
+  const taken = new Set(targets.map((t) => cellKey(map, t.col, t.row)));
+  return targets.map((t) => {
+    if (!HAULER_STOPS.includes(t.kind)) return t;
+    const town = towns[t.network];
+    const fromCentre = (c: Cell) => Math.hypot(c.x - town.x, c.y - town.y);
+    const dock = OFFSETS.map(([dx, dy]) => ({ x: t.col + dx, y: t.row + dy }))
+      .filter((c) => reached.has(cellKey(map, c.x, c.y)) && !taken.has(cellKey(map, c.x, c.y)))
+      .sort((a, b) => fromCentre(a) - fromCentre(b))[0];
+    if (!dock) return t;
+    taken.add(cellKey(map, dock.x, dock.y));
+    return { ...t, dock };
   });
+}
+
+/**
+ * The haulers (#67, #121): each network gets `haulersPerTown`, each starting at a dock of one of its
+ * pickups, the power station's first. From there they carry between networks (see the dashboard's
+ * stepHauler). A network whose pickups have no dock gets none.
+ */
+function placeHaulers(targets: readonly Target[], cfg: LocalMapConfig): Target[] {
+  const haulers: Target[] = [];
+  const networks = [...new Set(targets.map((t) => t.network))].sort((a, b) => a - b);
+  for (const network of networks) {
+    const pickups = targets
+      .map((t, index) => ({ t, index }))
+      .filter(({ t }) => t.network === network && t.dock && HAULER_PICKUPS.includes(t.kind))
+      .sort((a, b) => HAULER_PICKUPS.indexOf(a.t.kind) - HAULER_PICKUPS.indexOf(b.t.kind));
+    if (pickups.length === 0) continue;
+    for (let h = 0; h < cfg.haulersPerTown; h++) {
+      const { t, index } = pickups[h % pickups.length];
+      haulers.push({ col: t.dock!.x, row: t.dock!.y, kind: "hauler", supplies: [], network, home: index });
+    }
+  }
   return haulers;
+}
+
+/**
+ * Which towns a hauler carries between (#121): two towns are neighbours when the shortest walk
+ * between their centres over the terrain passes through no third town or its wall. So a trip
+ * never crosses the map, and leaves and enters by the gaps. A town left with none (every walk
+ * from it passes another town) takes the town it can walk to soonest, both ways round.
+ */
+export function townNeighbours(map: LocalMap, towns: readonly Town[], cfg: LocalMapConfig): number[][] {
+  const neighbours: Set<number>[] = towns.map(() => new Set<number>());
+  const lengths: number[][] = towns.map(() => towns.map(() => Infinity));
+  const outer = (t: Town, c: Cell) => inTown(t, cfg.townRadiusCols * cfg.wallReach, cfg.townRadiusRows * cfg.wallReach, c.x, c.y);
+  for (let a = 0; a < towns.length; a++) {
+    for (let b = a + 1; b < towns.length; b++) {
+      const route = findRoute(towns[a], towns[b], map);
+      if (route === null) continue;
+      lengths[a][b] = lengths[b][a] = route.length;
+      const passes = route.some((c) => towns.some((t, i) => i !== a && i !== b && outer(t, c)));
+      if (passes) continue;
+      neighbours[a].add(b);
+      neighbours[b].add(a);
+    }
+  }
+  towns.forEach((_, a) => {
+    if (neighbours[a].size > 0) return;
+    const nearest = lengths[a].indexOf(Math.min(...lengths[a]));
+    if (lengths[a][nearest] === Infinity) return;
+    neighbours[a].add(nearest);
+    neighbours[nearest].add(a);
+  });
+  return neighbours.map((n) => [...n].sort((x, y) => x - y));
 }
 
 /** Straight-line distance from a point to the segment between two cells. */

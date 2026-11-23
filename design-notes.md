@@ -382,7 +382,7 @@ Author's brief: assume half the missiles are shot down; the player should surviv
 Author-direction: aggression (storming in guns blazing, standing off, or running away) is tunable and should fit the role. A hauler should be predominantly defensive; a patrol should do its job and investigate.
 | Role | Stance | Behaviour |
 |---|---|---|
-| Hauler | Defensive | Keeps to its route and flees if threatened; fires only if cornered or attacked. Fleeing takes its cargo away, so chasing is a choice |
+| Hauler | Defensive | Keeps to its trips and flees if threatened; fires only if cornered or attacked. Fleeing takes its cargo away, so chasing is a choice |
 | Patroller | Investigates | Follows its beat; comes to look when something is wrong; has no missiles (manual), so on confirming an intruder it runs for help |
 | Defender | Guards | Stays home until alerted, then attacks intruders near its dome; does not chase far |
 | Hunter | Aggressive | Actively seeks the player within its network and closes in, firing |
@@ -464,6 +464,8 @@ Author's idea: the player has a defensive gun (working name: CIWS, as on ships);
 - **Slice 2:** the patroller, which runs for help when it confirms an intruder, and the defender, which stays in its dome until alerted.
 - **Slice 3:** the hauler, which flees and takes its cargo with it. Bosses come last.
   - Decided (author): no escort for the hauler for now. Revisit if playtesting shows haulers are easy prey.
+  - Decided (author, #121): haulers carry **between networks**, not round their own town, which read as a small aimless circle. A trip loads at a power station or mine, and unloads at a dome in a neighbouring network: one whose walk from here passes through no third town. Each trip's destination is a neighbour with an intact dome left, never straight back where the last load came from unless it is the only choice, picked by a seeded hash of the hauler and its trip so it looks unpredictable but is the same every run. With no neighbour to take a load, the hauler waits at its pickup. Every trip passes through the wall gaps (section 4.7), which become places to wait for one.
+  - Later, with replacement and supply (#70): the hashed choice becomes "the neediest neighbour", so haulers balance supplies and their routes shift as the player damages the economy.
 - **Hunter behaviour (agreed by the author, section 4.10 stances):** a scan no longer starts an attack. It alerts the hunter, and the hunter becomes a live enemy with these stages:
   1. **Idle:** stays at its post, unaware.
   2. **Alerted:** a scan's ring reached it. It moves toward the robot.
