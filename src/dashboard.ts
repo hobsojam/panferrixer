@@ -1,5 +1,5 @@
 import type { Config } from "./config";
-import { generateWorld, HAULER_PICKUPS, inTown, isArmedHelper, isEnemyKind, townCentres, walkedCells, type LocalMap, type Supply, type Target, type Town } from "./local-map";
+import { generateWorld, HAULER_PICKUPS, inTown, isArmedHelper, isEnemyKind, townCentres, walkedCells, type LocalMap, type Supply, type Target, type TargetKind, type Town } from "./local-map";
 import { createRng } from "./rng";
 import { allWhole, fullPlates, mendWeakest, plateToMend } from "./armour";
 import { canWalk, reachableGoal, stepToward } from "./enemy-move";
@@ -83,6 +83,11 @@ export interface World {
   haulerHearingCells: number; // a missile hit this close scares it
   haulerFleeCells: number; // how many steps over the terrain it looks for somewhere to flee to
   haulerFleeSeconds: number; // how long it keeps away after it last saw or heard the threat
+  startingStock: number; // supplies each network holds at the start (#70)
+  stockMax: number; // the most supplies a network holds: deliveries beyond it are wasted
+  replacementSeconds: number; // powered time a dome takes to build a replacement
+  replacementsPerNetworkMax: number; // the most replacements one network builds in a game
+  replacementsMax: number; // the most replacements built over the whole world in a game
   viewCols: number; // the mini map's local window, in cells: also the reach of the robot's equipment
   viewRows: number;
   // The energy and shield economy (#15). Energy is a slow clock: it drains with time and walking.
@@ -150,6 +155,21 @@ export interface DashboardState {
   helpCalls: HelpCall[];
   // What each hauler is doing (#67, #121). Missing means it is at its first pickup, about to load.
   haulers: Record<number, HaulerMind>;
+  // Replacement (#70). Each network's supplies; missing means it still has its starting stock.
+  stock: Record<number, number>;
+  // The replacement each network's domes are building now; missing means none.
+  builds: Record<number, Build>;
+  // Replacements each network has finished.
+  produced: Record<number, number>;
+  // Enemies (target indices) that have been built again at least once: they carry no cargo.
+  replaced: number[];
+}
+
+/** A replacement under way (#70): which enemy, which dome is building it, and its powered seconds so far. */
+export interface Build {
+  target: number;
+  dome: number;
+  progress: number;
 }
 
 /**
@@ -267,6 +287,11 @@ export function worldFor(cfg: Config): World {
       haulerHearingCells: cfg.dashboard.haulerHearingCells,
       haulerFleeCells: cfg.dashboard.haulerFleeCells,
       haulerFleeSeconds: cfg.dashboard.haulerFleeSeconds,
+      startingStock: cfg.dashboard.startingStock,
+      stockMax: cfg.dashboard.stockMax,
+      replacementSeconds: cfg.dashboard.replacementSeconds,
+      replacementsPerNetworkMax: cfg.dashboard.replacementsPerNetworkMax,
+      replacementsMax: cfg.dashboard.replacementsMax,
       viewCols: cfg.localMap.viewCols,
       viewRows: cfg.localMap.viewRows,
       energyMax: cfg.dashboard.energyCells,
@@ -320,6 +345,10 @@ export function createDashboardState(cfg: Config): DashboardState {
     patrollers: {},
     helpCalls: [],
     haulers: {},
+    stock: {},
+    builds: {},
+    produced: {},
+    replaced: [],
   };
 }
 
@@ -646,7 +675,8 @@ export function moveHunters(s: DashboardState, world: World, dt: number): Dashbo
     const pos = stepToward(here, goal, world.map, speed * dt);
     next = { ...next, hunterPos: { ...next.hunterPos, [index]: pos } };
   });
-  return next;
+  // The domes build replacements in the same world time (#70).
+  return stepProduction(next, world, dt);
 }
 
 /**
@@ -919,6 +949,123 @@ export function disturbPatrollers(s: DashboardState, spot: Point, radius: number
   return next;
 }
 
+/** The enemies a dome can build again once destroyed (#70): never hunters, nor (later) bosses. */
+export const REPLACEABLE: readonly TargetKind[] = ["patroller", "hauler", "defender"];
+
+/** A network's supplies now: what haulers have delivered, less what its domes have built with. */
+export function stockOf(s: DashboardState, network: number, world: World): number {
+  return s.stock[network] ?? world.startingStock;
+}
+
+/** A hauler unloads at a dome (#70, #121): the network's stock goes up by one, to its cap. */
+function deliver(s: DashboardState, network: number, world: World): DashboardState {
+  return { ...s, stock: { ...s.stock, [network]: Math.min(world.stockMax, stockOf(s, network, world) + 1) } };
+}
+
+/** Replacements a network has finished, and all networks together. */
+function producedIn(s: DashboardState, network: number): number {
+  return s.produced[network] ?? 0;
+}
+
+function producedTotal(s: DashboardState): number {
+  return Object.values(s.produced).reduce((a, b) => a + b, 0);
+}
+
+/**
+ * Which dome builds a replacement for this enemy, if one can (#70): a defender only by its own
+ * dome, anything else by its network's intact dome with the lowest index. Null if none stands.
+ */
+function builderFor(s: DashboardState, index: number, world: World): number | null {
+  const t = world.targets[index];
+  if (t.kind === "defender") return t.home !== undefined && !s.ruins.includes(t.home) ? t.home : null;
+  const dome = world.targets.findIndex((d, i) => d.kind === "dome" && d.network === t.network && !s.ruins.includes(i));
+  return dome === -1 ? null : dome;
+}
+
+/**
+ * Replacement (#70, design-notes 2.6): working domes build destroyed patrollers, haulers and
+ * defenders again. Each network builds one at a time, for the enemy it lost first.
+ *
+ * - **Starting** a build needs a dome that can build it, the network's power on, a unit of supply
+ *   in stock (spent at once), and room under both caps: replacementsPerNetworkMax for the network,
+ *   replacementsMax over the world (finished builds and the ones under way both count).
+ * - **Building** takes replacementSeconds of powered time. A power cut pauses it: it keeps its
+ *   progress and carries on when the power comes back.
+ * - **Losing the dome** loses the build and the supply spent on it. The enemy goes back to the
+ *   head of the queue, to start again from nothing when a dome can take it.
+ * - **Finished**, the enemy comes out of the dome's door as good as new, minding nothing. It carries
+ *   no cargo, and its old wreck is cleared away, with anything the robot left in it.
+ */
+function stepProduction(s: DashboardState, world: World, dt: number): DashboardState {
+  let next = s;
+  const networks = world.towns.length;
+  for (let network = 0; network < networks; network++) {
+    const build = next.builds[network];
+    if (build) {
+      if (next.ruins.includes(build.dome)) {
+        const { [network]: _lost, ...rest } = next.builds;
+        next = { ...next, builds: rest };
+        continue;
+      }
+      if (isSuppressed(next, network)) continue;
+      const progress = build.progress + dt;
+      if (progress < world.replacementSeconds) {
+        next = { ...next, builds: { ...next.builds, [network]: { ...build, progress } } };
+        continue;
+      }
+      next = finishBuild(next, network, build, world);
+      continue;
+    }
+    if (isSuppressed(next, network) || stockOf(next, network, world) < 1) continue;
+    if (producedIn(next, network) >= world.replacementsPerNetworkMax) continue;
+    if (producedTotal(next) + Object.keys(next.builds).length >= world.replacementsMax) continue;
+    for (const index of next.ruins) {
+      const t = world.targets[index];
+      if (t.network !== network || !REPLACEABLE.includes(t.kind)) continue;
+      const dome = builderFor(next, index, world);
+      if (dome === null) continue;
+      next = {
+        ...next,
+        stock: { ...next.stock, [network]: stockOf(next, network, world) - 1 },
+        builds: { ...next.builds, [network]: { target: index, dome, progress: 0 } },
+      };
+      break;
+    }
+  }
+  return next;
+}
+
+/** A finished replacement: the enemy stands again at the dome's door, its old self forgotten. */
+function finishBuild(s: DashboardState, network: number, build: Build, world: World): DashboardState {
+  const i = build.target;
+  const dome = world.targets[build.dome];
+  const door = dome.dock ?? { x: dome.col, y: dome.row };
+  const without = <V>(r: Record<number, V>): Record<number, V> => {
+    const { [i]: _gone, ...rest } = r;
+    return rest;
+  };
+  const { [network]: _done, ...builds } = s.builds;
+  // A defender goes back inside its own dome, asleep at its post; the rest come out of the door.
+  const hunterPos = world.targets[i].kind === "defender" ? without(s.hunterPos) : { ...without(s.hunterPos), [i]: { x: door.x, y: door.y } };
+  return {
+    ...s,
+    builds,
+    produced: { ...s.produced, [network]: producedIn(s, network) + 1 },
+    replaced: s.replaced.includes(i) ? s.replaced : [...s.replaced, i],
+    ruins: s.ruins.filter((r) => r !== i),
+    alerted: s.alerted.filter((a) => a !== i),
+    awake: s.awake.filter((a) => a !== i),
+    heldAttacks: s.heldAttacks.filter((a) => a !== i),
+    hunterPos,
+    hunterReadyAt: without(s.hunterReadyAt),
+    patrolling: without(s.patrolling),
+    rearming: without(s.rearming),
+    attacksUsed: without(s.attacksUsed),
+    patrollers: without(s.patrollers),
+    haulers: without(s.haulers),
+  };
+}
+
 /** A hauler's state of mind; one never seen to change is at its first pickup, about to load. */
 export function haulerMindOf(s: DashboardState, index: number, world: World): HaulerMind {
   const t = world.targets[index];
@@ -963,8 +1110,9 @@ function tripHash(index: number, trip: number): number {
 }
 
 /**
- * Where a hauler loaded in `town` carries its load (#121): one of the town's neighbours that still
- * has an intact dome to take it, chosen by its trip, so it looks unpredictable but never changes
+ * Where a hauler loaded in `town` carries its load (#121, #70): the neediest of the town's
+ * neighbours that still have an intact dome to take it, the one with the least supply in stock.
+ * Among the equally needy it chooses by its trip, so it looks unpredictable but never changes
  * between runs. It never carries straight back to `from` if any other neighbour will do. Null if no
  * neighbour has a dome left.
  */
@@ -972,7 +1120,9 @@ export function nextDestination(s: DashboardState, index: number, town: number, 
   const open = (world.neighbours[town] ?? []).filter((n) => docksIn(s, n, ["dome"], world).length > 0);
   if (open.length === 0) return null;
   const onward = open.filter((n) => n !== from);
-  const choices = onward.length > 0 ? onward : open;
+  const candidates = onward.length > 0 ? onward : open;
+  const least = Math.min(...candidates.map((n) => stockOf(s, n, world)));
+  const choices = candidates.filter((n) => stockOf(s, n, world) === least);
   return choices[tripHash(index, trip) % choices.length];
 }
 
@@ -1080,6 +1230,8 @@ function stepHauler(s: DashboardState, index: number, world: World, dt: number):
 
   const planned = planTrip(next, index, mind, here, world);
   if (planned !== mind) next = withHaulerMind(next, index, planned);
+  // Unloaded: the load goes into that network's stock (#70).
+  if (planned.trip > mind.trip) next = deliver(next, planned.town, world);
   if (!canDock(next, planned.stop, world)) return next; // nowhere to go: it waits
   return moveHauler(next, index, world.targets[planned.stop].dock!, world.haulerSpeed * dt, world);
 }
@@ -1474,6 +1626,8 @@ export interface Salvage {
 
 /** The units still lying in a target's ruin or wreck, one entry each: what it held, less what the robot has taken. */
 export function uncollected(s: DashboardState, index: number, world: World): Supply[] {
+  // A replacement carries no cargo, and its first wreck was cleared away when it was built (#70).
+  if (s.replaced.includes(index)) return [];
   const left = [...world.targets[index].supplies];
   for (const f of s.found) {
     if (f.target !== index) continue;

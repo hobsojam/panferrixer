@@ -249,6 +249,13 @@ export const config = {
     haulerHearingCells: 15, // a missile hit this close scares it, as it draws a patroller
     haulerFleeCells: 10, // how far, in steps over the terrain, it looks for somewhere away from the threat
     haulerFleeSeconds: 8, // how long it keeps away after it last saw or heard the threat, before going back to its route
+    // Replacement (#70, design-notes 2.6): working domes build destroyed patrollers, haulers and
+    // defenders again, from supplies the haulers deliver. Placeholders until playtested.
+    startingStock: 2, // supplies each network holds at the start
+    stockMax: 4, // the most a network holds
+    replacementSeconds: 60, // powered time to build one: long enough to salvage the wreck first
+    replacementsPerNetworkMax: 3, // the most one network builds in a game
+    replacementsMax: 12, // the most built over the whole world in a game
     startClearanceCells: 2, // the robot starts at least this far outside a town and beyond any hunter's sight
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },

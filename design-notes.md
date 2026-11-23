@@ -61,6 +61,13 @@ Six enemy types in ascending order of power, described by role:
 | Boss 1 | Defected renegade; heavily armoured; has radar that detects beacon signals; roams between networks | No |
 | Boss 2 | The enemy leader; roams between networks; heads straight for the player when a beacon alerts him | No |
 - **Replacement is a supply chain:** destroyed patrollers, haulers and defenders are replaced by *correctly functioning domes*, meaning domes with enough power and raw material. This is already a built-in limiter on enemy numbers. [Manual]
+  - As built (#70; values are placeholders in `config.ts`):
+    - **Supply:** each network holds a stock of supplies, 2 at the start and at most 4. Every load a hauler unloads at one of its domes adds one.
+    - **Queue:** a network's destroyed patrollers, haulers and defenders wait to be built again, the first lost first, one build at a time per network. Hunters (and, later, bosses) never join it.
+    - **Starting** a build needs a dome that can build it (a defender only its own dome; anything else any intact dome in its network), the network's power on, and one supply, spent at once.
+    - **Building** takes 60 seconds of powered time. A power cut pauses it with its progress kept, and it resumes when the power returns. Losing the dome loses the build and its supply; the enemy goes back to the head of the queue and starts again from nothing.
+    - **Caps:** at most 3 replacements per network and 12 over the world in a game, counting finished builds and those under way.
+    - **Finished,** the enemy comes out of the dome's door (a defender goes back inside, asleep) with its state of mind reset. A replacement carries no cargo, and its old wreck is cleared away with anything left in it, so the build time is also the time to salvage it.
 - [Author-observed] Enemies are roughly two kinds: scripted patrols, or very simple (non-AI) attack-the-player and defend-the-buildings behaviour. They are separate targets; the only pressure to engage them is that they attack the player.
 
 ### 2.7 The interface: eight icons [Manual, with Author-observed usage]
@@ -465,7 +472,7 @@ Author's idea: the player has a defensive gun (working name: CIWS, as on ships);
 - **Slice 3:** the hauler, which flees and takes its cargo with it. Bosses come last.
   - Decided (author): no escort for the hauler for now. Revisit if playtesting shows haulers are easy prey.
   - Decided (author, #121): haulers carry **between networks**, not round their own town, which read as a small aimless circle. A trip loads at a power station or mine, and unloads at a dome in a neighbouring network: one whose walk from here passes through no third town. Each trip's destination is a neighbour with an intact dome left, never straight back where the last load came from unless it is the only choice, picked by a seeded hash of the hauler and its trip so it looks unpredictable but is the same every run. With no neighbour to take a load, the hauler waits at its pickup. Every trip passes through the wall gaps (section 4.7), which become places to wait for one.
-  - Later, with replacement and supply (#70): the hashed choice becomes "the neediest neighbour", so haulers balance supplies and their routes shift as the player damages the economy.
+  - Done with replacement and supply (#70): the destination is the neediest neighbour, the one with the least supply in stock, and the hash only breaks ties. Haulers balance supplies, and their routes shift as the player damages the economy.
 - **Hunter behaviour (agreed by the author, section 4.10 stances):** a scan no longer starts an attack. It alerts the hunter, and the hunter becomes a live enemy with these stages:
   1. **Idle:** stays at its post, unaware.
   2. **Alerted:** a scan's ring reached it. It moves toward the robot.
