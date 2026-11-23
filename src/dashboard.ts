@@ -1,5 +1,5 @@
 import type { Config } from "./config";
-import { generateWorld, inTown, isArmedHelper, isEnemyKind, townCentres, walkedCells, type LocalMap, type Supply, type Target, type Town } from "./local-map";
+import { generateWorld, HAULER_PICKUPS, inTown, isArmedHelper, isEnemyKind, townCentres, walkedCells, type LocalMap, type Supply, type Target, type Town } from "./local-map";
 import { createRng } from "./rng";
 import { allWhole, fullPlates, mendWeakest, plateToMend } from "./armour";
 import { canWalk, reachableGoal, stepToward } from "./enemy-move";
@@ -47,6 +47,7 @@ export interface World {
   townRadiusCols: number;
   townRadiusRows: number;
   targets: readonly Target[];
+  neighbours: readonly (readonly number[])[]; // per town: the towns its haulers carry to (#121)
   range: number;
   walkSpeed: number; // cells per second
   pickupRadius: number; // a drop within this many cells is collected automatically
@@ -147,19 +148,24 @@ export interface DashboardState {
   patrollers: Record<number, PatrollerMind>;
   // Every call for help a patroller has raised, oldest first: observable by game logic and tests.
   helpCalls: HelpCall[];
-  // What each hauler is doing (#67). Missing means it is on its route, heading for its second stop.
+  // What each hauler is doing (#67, #121). Missing means it is at its first pickup, about to load.
   haulers: Record<number, HaulerMind>;
 }
 
 /**
- * A hauler's state of mind (#67, design-notes 4.10). On its **route** it carries its cargo round
- * its stops. **Fleeing**, it runs from a threat (the robot in sight, a scan ring that reaches it,
- * a missile hit within earshot) to somewhere away from it, and keeps away until `until` has passed
- * without a fresh threat. Then it goes back to the nearest stop on its route.
+ * A hauler's state of mind (#67, #121, design-notes 4.10). **Hauling**, it goes to load at a pickup
+ * (power station or mine) in the town it is in, carries the load to a dome in a neighbouring network,
+ * then loads again there. **Fleeing**, it runs from a threat (the robot in sight, a scan ring that
+ * reaches it, a missile hit within earshot) to somewhere away from it, and keeps away until `until`
+ * has passed without a fresh threat. Then it carries on with the trip it was on.
  */
 export interface HaulerMind {
-  mode: "route" | "flee";
-  leg: number; // index into its route of the stop it is heading for
+  mode: "haul" | "flee";
+  stop: number; // the building (target index) whose dock it is heading for
+  loading: boolean; // true heading for a pickup, false carrying a load to a dome
+  town: number; // the network that building is in
+  from: number | null; // the network its last load came from: it does not carry straight back there if it can help it
+  trip: number; // loads delivered so far, which seeds the choice of the next destination
   threat: Point | null; // where the threat was last seen or heard
   goal: Point | null; // where it is fleeing to
   until: number | null; // dashboard time it stops fleeing, if nothing new scares it
@@ -218,13 +224,14 @@ let cachedWorld: World | null = null;
 /** The whole map, built once from the config. Deterministic, so every caller sees the same world. */
 export function worldFor(cfg: Config): World {
   if (!cachedWorld) {
-    const { map, towns, targets } = generateWorld(cfg.localMap);
+    const { map, towns, targets, neighbours } = generateWorld(cfg.localMap);
     cachedWorld = {
       map,
       towns,
       townRadiusCols: cfg.localMap.townRadiusCols,
       townRadiusRows: cfg.localMap.townRadiusRows,
       targets,
+      neighbours,
       range: cfg.dashboard.targetRange,
       walkSpeed: cfg.dashboard.walkSpeed,
       pickupRadius: cfg.dashboard.pickupRadius,
@@ -912,14 +919,61 @@ export function disturbPatrollers(s: DashboardState, spot: Point, radius: number
   return next;
 }
 
-/** A hauler's state of mind; one never seen to change is on its route, heading for its second stop. */
+/** A hauler's state of mind; one never seen to change is at its first pickup, about to load. */
 export function haulerMindOf(s: DashboardState, index: number, world: World): HaulerMind {
-  const route = world.targets[index].beat ?? [];
-  return s.haulers[index] ?? { mode: "route", leg: route.length > 1 ? 1 : 0, threat: null, goal: null, until: null };
+  const t = world.targets[index];
+  return s.haulers[index] ?? { mode: "haul", stop: t.home ?? -1, loading: true, town: t.network, from: null, trip: 0, threat: null, goal: null, until: null };
 }
 
 function withHaulerMind(s: DashboardState, index: number, mind: HaulerMind): DashboardState {
   return { ...s, haulers: { ...s.haulers, [index]: mind } };
+}
+
+/** True while a building can take a hauler: it stands, and it has a dock. */
+function canDock(s: DashboardState, building: number, world: World): boolean {
+  return world.targets[building]?.dock !== undefined && !s.ruins.includes(building);
+}
+
+/** A network's intact buildings of these kinds that have a dock, by target index. */
+function docksIn(s: DashboardState, network: number, kinds: readonly string[], world: World): number[] {
+  return world.targets.flatMap((t, i) => (t.network === network && kinds.includes(t.kind) && canDock(s, i, world) ? [i] : []));
+}
+
+/** Of these buildings, the one whose dock is nearest `p`; ties to the lower index. Null if none. */
+function nearestDock(buildings: readonly number[], p: Point, world: World): number | null {
+  let best: number | null = null;
+  let bestDistance = Infinity;
+  for (const i of buildings) {
+    const dock = world.targets[i].dock!;
+    const d = Math.hypot(dock.x - p.x, dock.y - p.y);
+    if (d < bestDistance) {
+      best = i;
+      bestDistance = d;
+    }
+  }
+  return best;
+}
+
+/** A well-mixed whole number from a hauler and its trip: the same pair always gives the same number. */
+function tripHash(index: number, trip: number): number {
+  let h = Math.imul(index + 1, 0x9e3779b1) ^ Math.imul(trip + 1, 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+/**
+ * Where a hauler loaded in `town` carries its load (#121): one of the town's neighbours that still
+ * has an intact dome to take it, chosen by its trip, so it looks unpredictable but never changes
+ * between runs. It never carries straight back to `from` if any other neighbour will do. Null if no
+ * neighbour has a dome left.
+ */
+export function nextDestination(s: DashboardState, index: number, town: number, from: number | null, trip: number, world: World): number | null {
+  const open = (world.neighbours[town] ?? []).filter((n) => docksIn(s, n, ["dome"], world).length > 0);
+  if (open.length === 0) return null;
+  const onward = open.filter((n) => n !== from);
+  const choices = onward.length > 0 ? onward : open;
+  return choices[tripHash(index, trip) % choices.length];
 }
 
 /**
@@ -993,14 +1047,13 @@ export function fleeGoal(s: DashboardState, here: Point, threat: Point, world: W
 }
 
 /**
- * One step of a hauler (#67, design-notes 4.10): defensive. It is always looking: the robot in
+ * One step of a hauler (#67, #121, design-notes 4.10): defensive. It is always looking: the robot in
  * sight is a threat, and it flees. Fleeing, it heads for the place furthest from the threat it can
  * reach soon, choosing again whenever the threat has moved round so that its goal no longer takes it
- * away. Once its time is up with nothing new, it goes back to the nearest stop on its route and
- * carries on. Its cargo goes with it: a wreck lies where it fell.
+ * away. Once its time is up with nothing new, it carries on with its trip. Its cargo goes with it: a
+ * wreck lies where it fell.
  */
 function stepHauler(s: DashboardState, index: number, world: World, dt: number): DashboardState {
-  const route = world.targets[index].beat ?? [];
   const here = positionOf(s, index, world);
   let next = s;
   if (distanceTo(s.pos, here.x, here.y) <= world.haulerSightCells) {
@@ -1009,11 +1062,7 @@ function stepHauler(s: DashboardState, index: number, world: World, dt: number):
   let mind = haulerMindOf(next, index, world);
 
   if (mind.mode === "flee" && mind.threat) {
-    if (next.time >= (mind.until ?? 0)) {
-      // Nothing new for long enough: back to work, from the nearest stop.
-      mind = { mode: "route", leg: nearestLeg(route, here), threat: null, goal: null, until: null };
-      next = withHaulerMind(next, index, mind);
-    } else {
+    if (next.time < (mind.until ?? 0)) {
       const threat = mind.threat;
       const away = (p: Point) => Math.hypot(p.x - threat.x, p.y - threat.y);
       let goal = mind.goal;
@@ -1024,13 +1073,64 @@ function stepHauler(s: DashboardState, index: number, world: World, dt: number):
       if (here.x === goal.x && here.y === goal.y) return next;
       return moveHauler(next, index, goal, world.haulerFleeSpeed * dt, world);
     }
+    // Nothing new for long enough: back to the trip it was on.
+    mind = { ...mind, mode: "haul", threat: null, goal: null, until: null };
+    next = withHaulerMind(next, index, mind);
   }
 
-  if (route.length === 0) return next;
-  let leg = mind.leg % route.length;
-  if (here.x === route[leg].x && here.y === route[leg].y) leg = (leg + 1) % route.length;
-  if (leg !== mind.leg) next = withHaulerMind(next, index, { ...mind, leg });
-  return moveHauler(next, index, route[leg], world.haulerSpeed * dt, world);
+  const planned = planTrip(next, index, mind, here, world);
+  if (planned !== mind) next = withHaulerMind(next, index, planned);
+  if (!canDock(next, planned.stop, world)) return next; // nowhere to go: it waits
+  return moveHauler(next, index, world.targets[planned.stop].dock!, world.haulerSpeed * dt, world);
+}
+
+/**
+ * A hauler's trip, brought up to date (#121). Arrived at a pickup, it loads and sets off for a dome
+ * in the next destination. Arrived at a dome, it unloads, and goes to load again at the nearest
+ * pickup in that town. A building destroyed on the way is swapped for the nearest one in the same
+ * town that can take it; a load whose destination has no dome left is carried somewhere else.
+ * Returns the same mind when nothing changes.
+ */
+function planTrip(s: DashboardState, index: number, mind: HaulerMind, here: Point, world: World): HaulerMind {
+  let m = mind;
+  const at = (i: number) => {
+    const dock = world.targets[i].dock!;
+    return here.x === dock.x && here.y === dock.y;
+  };
+  // Up to two changes in one step: unload, then load; or load, then set off.
+  for (let pass = 0; pass < 2; pass++) {
+    if (m.loading) {
+      if (!canDock(s, m.stop, world) || !HAULER_PICKUPS.includes(world.targets[m.stop].kind)) {
+        const pickup = nearestDock(docksIn(s, m.town, HAULER_PICKUPS, world), here, world);
+        if (pickup === null) return m;
+        m = { ...m, stop: pickup };
+      }
+      if (!at(m.stop)) return m;
+      // Loaded: off to the next network.
+      const destination = nextDestination(s, index, m.town, m.from, m.trip, world);
+      if (destination === null) return m; // nowhere to deliver: it waits at the pickup
+      const dome = nearestDock(docksIn(s, destination, ["dome"], world), world.towns[m.town] ?? here, world)!;
+      m = { ...m, loading: false, stop: dome, from: m.town, town: destination };
+      continue;
+    }
+    if (!canDock(s, m.stop, world)) {
+      const dome = nearestDock(docksIn(s, m.town, ["dome"], world), here, world);
+      if (dome !== null) {
+        m = { ...m, stop: dome };
+      } else {
+        // The destination has no dome left: carry the load on to another neighbour of where it came from.
+        const destination = nextDestination(s, index, m.from ?? m.town, m.town, m.trip, world);
+        if (destination === null) return m;
+        m = { ...m, town: destination, stop: nearestDock(docksIn(s, destination, ["dome"], world), here, world)! };
+      }
+    }
+    if (!at(m.stop)) return m;
+    // Unloaded: load again at the nearest pickup here.
+    const pickup = nearestDock(docksIn(s, m.town, HAULER_PICKUPS, world), here, world);
+    if (pickup === null) return { ...m, loading: true, trip: m.trip + 1 };
+    m = { ...m, loading: true, trip: m.trip + 1, stop: pickup };
+  }
+  return m;
 }
 
 function moveHauler(s: DashboardState, index: number, goal: Point, distance: number, world: World): DashboardState {

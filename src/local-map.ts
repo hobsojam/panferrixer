@@ -13,6 +13,11 @@ export interface LocalMapConfig {
   townRadiusCols: number; // half-size of a town's area, in cells
   townRadiusRows: number;
   smoothingPasses: number;
+  // Town walls (#89): a ring of high ground just outside most towns, broken by 1 or 2 gaps.
+  wallReach: number; // the ring runs from the town's edge out to this many times its radii
+  wallShare: number; // the share of the ring that is wall; the rest is split between the gaps
+  openTownShare: number; // this share of the towns has no wall at all
+  twoGapChance: number; // a walled town has two gaps with this chance, otherwise one
   valleyBelow: number; // raw height below this is a valley
   highAbove: number; // raw height above this is high ground
   domesPerTown: number; // at least as many as the most defenders a network can draw (design-notes 4.4)
@@ -34,7 +39,7 @@ export interface LocalMapConfig {
   patrolBeatSpacing: number; // waypoints on one loop are at least this many cells apart
   startTown: number; // the town where the robot begins
   patrolStartClearCells: number; // no beat comes this close to the start town's centre
-  haulersPerTown: number; // #67: each network's haulers, carrying between its power station, mines and domes
+  haulersPerTown: number; // #67, #121: each network's haulers, which start there and carry between networks
   // Difficulty by distance (design-notes 4.5): towns ranked by walking distance from the start town
   // fall into bands; further bands hold hardened hunters (jamming) and defenders (point defence).
   bandShares: { near: number; middle: number }; // the nearest share of towns, then the next; the rest are far
@@ -82,8 +87,9 @@ export interface Target {
   supplies: Supply[]; // one entry per unit, hidden in the building or enemy; found only once it is destroyed
   part?: number; // which part (0 to partCount - 1) lies under the building, if any; hidden like supplies
   network: number; // the town (network) it was placed in. Towns can overlap, so position alone does not say
-  home?: number; // a defender's dome (target index); its col and row are the free cell beside it, its post
-  beat?: Cell[]; // a patroller's loop of waypoints, or a hauler's route; its col and row are the first, where it starts
+  home?: number; // a defender's dome, or the building a hauler starts loading at (target index)
+  beat?: Cell[]; // a patroller's loop of waypoints; its col and row are the first, where it starts
+  dock?: Cell; // a power station's, mine's or dome's loading cell, where haulers stop (#121); none if it has no free side
   defences?: FlightDefences; // a hardened enemy's defences against a missile; none for the standard types
 }
 
@@ -105,6 +111,8 @@ export interface World {
   towns: Town[];
   targets: Target[];
   bands: Band[]; // per town (network)
+  walls: (TownWall | null)[]; // per town: its wall's gaps, or null for an open town (#89)
+  neighbours: number[][]; // per town: the towns a hauler carries to from it, in ascending order (#121)
 }
 
 /**
@@ -146,10 +154,27 @@ export function inTown(town: Town, radiusCols: number, radiusRows: number, x: nu
 }
 
 /**
+ * True when (x, y) is in the ring just outside a town where its wall stands (#89): beyond the
+ * town's edge, out to `reach` times its radii. Whether a ring cell is wall or gap is the map's.
+ */
+export function inWallRing(town: Town, radiusCols: number, radiusRows: number, reach: number, x: number, y: number): boolean {
+  const dx = (x - town.x) / radiusCols;
+  const dy = (y - town.y) / radiusRows;
+  const d = dx * dx + dy * dy;
+  return d > 1 && d <= reach * reach;
+}
+
+/** The bearing of a cell from a town's centre, measured on the town's ellipse: -PI..PI. */
+export function bearingFrom(town: Town, radiusCols: number, radiusRows: number, x: number, y: number): number {
+  return Math.atan2((y - town.y) / radiusRows, (x - town.x) / radiusCols);
+}
+
+/**
  * The whole map: one terrain grid with a town at each network node. Deterministic
  * from the world seed, so the same world is rebuilt every time it is needed.
- * Towns are valley or ground. Afterwards the fewest high-ground cells needed are
- * opened so every town can be walked to from every other.
+ * Towns are valley or ground. Most are then walled (#89): a ring of high ground with 1 or
+ * 2 gaps. Afterwards the fewest high-ground cells needed are opened so every town can be
+ * walked to from every other, and every gap leads out, without breaking a wall.
  */
 export function generateWorld(cfg: LocalMapConfig): World {
   const rng = createRng(cfg.worldSeed * 7919);
@@ -174,13 +199,126 @@ export function generateWorld(cfg: LocalMapConfig): World {
     }
   }
 
-  connectTowns(map, towns);
+  const walls = buildWalls(map, towns, cfg);
+  connectTowns(map, towns, walls);
+  openGaps(map, towns, walls, cfg);
   const bands = townBands(map, towns, cfg);
-  return { map, towns, targets: placeTargets(map, towns, bands, cfg), bands };
+  const byTown = towns.map((_, i) => walls.towns.find((w) => w.town === i) ?? null);
+  return { map, towns, targets: placeTargets(map, towns, bands, cfg), bands, walls: byTown, neighbours: townNeighbours(map, towns, cfg) };
 }
 
-/** Repeatedly opens the cheapest route from the connected towns to one that is cut off. */
-function connectTowns(map: LocalMap, towns: Town[]): void {
+/** A walled town's gaps (#89): the bearing each is centred on, and how wide each is, in radians. */
+export interface TownWall {
+  town: number;
+  gaps: number[];
+  gapWidth: number;
+}
+
+/** The wall cells of every walled town, and each walled town's gaps. */
+interface Walls {
+  cells: Set<number>;
+  towns: TownWall[];
+}
+
+/** True when a bearing lies inside a gap centred on `centre`. */
+export function inGap(bearing: number, centre: number, width: number): boolean {
+  const off = Math.abs(((bearing - centre + 3 * Math.PI) % (2 * Math.PI)) - Math.PI);
+  return off <= width / 2;
+}
+
+/**
+ * Town walls (#89, design-notes 4.7): every town but `openTownShare` of them, chosen at random,
+ * gets a ring of high ground just outside its area, `wallShare` of the way round. The rest of the
+ * ring is 1 or 2 gaps, cleared to ground, so each network has its own shape and its gaps are
+ * chokepoints for the robot and enemies alike. A second gap sits roughly opposite the first, as a
+ * back door. A gap is placed where it opens onto the map, not off its edge. The ring is thicker
+ * than one step of a walk can cross, so the wall has no diagonal leaks. Drawn from its own stream,
+ * so the rest of the terrain does not move when the wall rules change.
+ */
+function buildWalls(map: LocalMap, towns: readonly Town[], cfg: LocalMapConfig): Walls {
+  const rng = createRng(cfg.worldSeed * 8803 + 17);
+  const order = towns.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  const open = new Set(order.slice(0, Math.round(towns.length * cfg.openTownShare)));
+  const walls: Walls = { cells: new Set(), towns: [] };
+  towns.forEach((town, index) => {
+    if (open.has(index)) return;
+    const ring: Cell[] = [];
+    const reachCols = Math.ceil(cfg.townRadiusCols * cfg.wallReach);
+    const reachRows = Math.ceil(cfg.townRadiusRows * cfg.wallReach);
+    for (let y = Math.max(0, town.y - reachRows); y <= Math.min(map.rows - 1, town.y + reachRows); y++) {
+      for (let x = Math.max(0, town.x - reachCols); x <= Math.min(map.cols - 1, town.x + reachCols); x++) {
+        if (inWallRing(town, cfg.townRadiusCols, cfg.townRadiusRows, cfg.wallReach, x, y)) ring.push({ x, y });
+      }
+    }
+    const count = rng() < cfg.twoGapChance ? 2 : 1;
+    const gapWidth = ((1 - cfg.wallShare) * 2 * Math.PI) / count;
+    const bearing = (c: Cell) => bearingFrom(town, cfg.townRadiusCols, cfg.townRadiusRows, c.x, c.y);
+    // A gap must open onto the map: at least a few of its ring cells away from the map's edge.
+    const opensOut = (centre: number) =>
+      ring.filter((c) => inGap(bearing(c), centre, gapWidth) && c.x > 0 && c.y > 0 && c.x < map.cols - 1 && c.y < map.rows - 1).length >= 3;
+    const gaps: number[] = [];
+    for (let g = 0; g < count; g++) {
+      let centre = 0;
+      for (let tries = 0; tries < 20; tries++) {
+        centre = g === 0 ? rng() * 2 * Math.PI - Math.PI : gaps[0] + Math.PI + (rng() - 0.5) * (Math.PI / 2);
+        if (opensOut(centre)) break;
+      }
+      gaps.push(centre);
+    }
+    for (const c of ring) {
+      if (gaps.some((g) => inGap(bearing(c), g, gapWidth))) {
+        if (map.tiers[c.y][c.x] === 2) map.tiers[c.y][c.x] = 1;
+      } else {
+        map.tiers[c.y][c.x] = 2;
+        walls.cells.add(c.y * map.cols + c.x);
+      }
+    }
+    walls.towns.push({ town: index, gaps, gapWidth });
+  });
+  return walls;
+}
+
+/**
+ * Every gap leads somewhere (#89): from the gap's outer cells, the cheapest way out to open ground
+ * clear of every town and wall ring is opened, if there is not one already. It may not run back
+ * through its own town, or the far gap would do the work and this one would open onto a dead end.
+ */
+function openGaps(map: LocalMap, towns: readonly Town[], walls: Walls, cfg: LocalMapConfig): void {
+  const key = (x: number, y: number) => y * map.cols + x;
+  const nearTown = (x: number, y: number) =>
+    towns.some((t) => inTown(t, cfg.townRadiusCols * cfg.wallReach, cfg.townRadiusRows * cfg.wallReach, x, y));
+  for (const wall of walls.towns) {
+    const town = towns[wall.town];
+    const blocked = new Set(walls.cells);
+    for (let y = town.y - cfg.townRadiusRows; y <= town.y + cfg.townRadiusRows; y++) {
+      for (let x = town.x - cfg.townRadiusCols; x <= town.x + cfg.townRadiusCols; x++) {
+        if (x >= 0 && y >= 0 && x < map.cols && y < map.rows && inTown(town, cfg.townRadiusCols, cfg.townRadiusRows, x, y)) blocked.add(key(x, y));
+      }
+    }
+    for (const centre of wall.gaps) {
+      const sources: Cell[] = [];
+      for (let y = 0; y < map.rows; y++) {
+        for (let x = 0; x < map.cols; x++) {
+          if (!inWallRing(town, cfg.townRadiusCols, cfg.townRadiusRows, cfg.wallReach, x, y) || blocked.has(key(x, y))) continue;
+          if (inGap(bearingFrom(town, cfg.townRadiusCols, cfg.townRadiusRows, x, y), centre, wall.gapWidth)) sources.push({ x, y });
+        }
+      }
+      if (sources.length === 0) continue;
+      const path = cheapestPath(map, sources, (x, y) => !nearTown(x, y) && map.tiers[y][x] !== 2, blocked);
+      for (const c of path ?? []) if (map.tiers[c.y][c.x] === 2) map.tiers[c.y][c.x] = 1;
+    }
+  }
+}
+
+/**
+ * Repeatedly opens the cheapest route from the connected towns to one that is cut off. Wall
+ * cells are never opened (#89): routes come in through the gaps.
+ */
+function connectTowns(map: LocalMap, towns: Town[], walls: Walls): void {
   const key = (x: number, y: number) => y * map.cols + x;
   for (;;) {
     const reached = reachableFrom(towns[0], map);
@@ -189,7 +327,7 @@ function connectTowns(map: LocalMap, towns: Town[]): void {
 
     const sources: Cell[] = [...reached].map((k) => ({ x: k % map.cols, y: Math.floor(k / map.cols) }));
     const goals = new Set(unreached.map((t) => key(t.x, t.y)));
-    const path = cheapestPath(map, sources, (x, y) => goals.has(key(x, y)));
+    const path = cheapestPath(map, sources, (x, y) => goals.has(key(x, y)), walls.cells);
     if (path === null) return;
     for (const c of path) {
       if (map.tiers[c.y][c.x] === 2) map.tiers[c.y][c.x] = 1;
@@ -199,9 +337,10 @@ function connectTowns(map: LocalMap, towns: Town[]): void {
 
 /**
  * Least high-ground route from any source cell to a goal cell. Entering high ground
- * costs one, anything else costs nothing. Returns the cells from source to goal.
+ * costs one, anything else costs nothing; `never` cells are not entered at all. Returns
+ * the cells from source to goal.
  */
-function cheapestPath(map: LocalMap, sources: Cell[], isGoal: (x: number, y: number) => boolean): Cell[] | null {
+function cheapestPath(map: LocalMap, sources: Cell[], isGoal: (x: number, y: number) => boolean, never: ReadonlySet<number> = new Set()): Cell[] | null {
   const key = (x: number, y: number) => y * map.cols + x;
   const dist = new Map<number, number>();
   const prev = new Map<number, number>();
@@ -233,6 +372,7 @@ function cheapestPath(map: LocalMap, sources: Cell[], isGoal: (x: number, y: num
         const ny = cell.y + dy;
         if (nx < 0 || ny < 0 || nx >= map.cols || ny >= map.rows) continue;
         const nk = key(nx, ny);
+        if (never.has(nk)) continue;
         const cost = map.tiers[ny][nx] === 2 ? 1 : 0;
         const nd = d + cost;
         if (!dist.has(nk) || dist.get(nk)! > nd) {
@@ -291,8 +431,10 @@ function placeTargets(map: LocalMap, towns: Town[], bands: readonly Band[], cfg:
   }
   const withGarrisons = [...placeParts(map, towns, targets, bands, cfg), ...placeDefenders(map, towns, targets, cfg)];
   const withPatrollers = [...withGarrisons, ...placePatrollers(map, towns, withGarrisons, cfg)];
-  // Haulers come last, and their cargo is rolled after everything else's, so no other target moves or changes.
-  return rollSupplies(harden([...withPatrollers, ...placeHaulers(map, towns, withPatrollers, cfg)], bands, cfg), cfg);
+  // Docks and haulers come last, and the haulers' cargo is rolled after everything else's, so no
+  // other target moves or changes.
+  const docked = placeDocks(map, towns, withPatrollers);
+  return rollSupplies(harden([...docked, ...placeHaulers(docked, cfg)], bands, cfg), cfg);
 }
 
 /**
@@ -446,42 +588,84 @@ function loopStaysClear(beat: readonly Cell[], map: LocalMap, start: Cell, clear
   return legs.every(({ from, to }) => (findRoute(from, to, map) ?? []).every(clear));
 }
 
-/** The buildings a hauler carries between (#67, design-notes 2.6): raw material from mines, power pods from the station, to the domes. */
-const HAULER_STOPS: readonly TargetKind[] = ["power", "mine", "dome"];
+/** The buildings a hauler stops at (#67, design-notes 2.6): it loads raw material at mines and power pods at the station, and unloads at the domes. */
+export const HAULER_PICKUPS: readonly TargetKind[] = ["power", "mine"];
+const HAULER_STOPS: readonly TargetKind[] = [...HAULER_PICKUPS, "dome"];
 
 /**
- * The haulers (#67): each network gets `haulersPerTown`, each on a route round its network's power
- * station, mines and domes. A stop is the free cell beside its building nearest the town centre:
- * open ground the robot can reach (so a hauler can be chased) and no other target's cell. The stops
- * are ordered round the town centre so the route does not cross itself; a second hauler in a network
- * starts further round the same loop. A network with fewer than two stops gets no hauler. Nothing is
- * drawn at random, so no other placement moves.
+ * Docks (#121): each power station, mine and dome gets the free cell beside it nearest its town's
+ * centre, where a hauler loads or unloads. It is open ground the robot can reach (so a hauler can be
+ * chased there), no other target's cell and no other dock. A building with no such side has no dock,
+ * and haulers pass it by. Nothing is drawn at random, so no other placement moves.
  */
-function placeHaulers(map: LocalMap, towns: Town[], targets: readonly Target[], cfg: LocalMapConfig): Target[] {
+function placeDocks(map: LocalMap, towns: Town[], targets: readonly Target[]): Target[] {
   const blocked = new Set(targets.filter((t) => !isEnemyKind(t.kind)).map((t) => cellKey(map, t.col, t.row)));
   const reached = reachableFrom(towns[0], map, blocked);
-  const occupied = new Set(targets.map((t) => cellKey(map, t.col, t.row)));
-  const haulers: Target[] = [];
-  towns.forEach((town, network) => {
-    const near = (a: Cell, b: Cell) => Math.hypot(a.x - town.x, a.y - town.y) - Math.hypot(b.x - town.x, b.y - town.y);
-    const stops: Cell[] = [];
-    for (const t of targets) {
-      if (t.network !== network || !HAULER_STOPS.includes(t.kind)) continue;
-      const beside = OFFSETS.map(([dx, dy]) => ({ x: t.col + dx, y: t.row + dy }))
-        .filter((c) => reached.has(cellKey(map, c.x, c.y)) && !occupied.has(cellKey(map, c.x, c.y)))
-        .filter((c) => !stops.some((s) => s.x === c.x && s.y === c.y))
-        .sort(near)[0];
-      if (beside) stops.push(beside);
-    }
-    if (stops.length < 2) return;
-    stops.sort((a, b) => Math.atan2(a.y - town.y, a.x - town.x) - Math.atan2(b.y - town.y, b.x - town.x));
-    for (let h = 0; h < cfg.haulersPerTown; h++) {
-      const shift = Math.floor((h * stops.length) / cfg.haulersPerTown);
-      const route = [...stops.slice(shift), ...stops.slice(0, shift)];
-      haulers.push({ col: route[0].x, row: route[0].y, kind: "hauler", supplies: [], network, beat: route });
-    }
+  const taken = new Set(targets.map((t) => cellKey(map, t.col, t.row)));
+  return targets.map((t) => {
+    if (!HAULER_STOPS.includes(t.kind)) return t;
+    const town = towns[t.network];
+    const fromCentre = (c: Cell) => Math.hypot(c.x - town.x, c.y - town.y);
+    const dock = OFFSETS.map(([dx, dy]) => ({ x: t.col + dx, y: t.row + dy }))
+      .filter((c) => reached.has(cellKey(map, c.x, c.y)) && !taken.has(cellKey(map, c.x, c.y)))
+      .sort((a, b) => fromCentre(a) - fromCentre(b))[0];
+    if (!dock) return t;
+    taken.add(cellKey(map, dock.x, dock.y));
+    return { ...t, dock };
   });
+}
+
+/**
+ * The haulers (#67, #121): each network gets `haulersPerTown`, each starting at a dock of one of its
+ * pickups, the power station's first. From there they carry between networks (see the dashboard's
+ * stepHauler). A network whose pickups have no dock gets none.
+ */
+function placeHaulers(targets: readonly Target[], cfg: LocalMapConfig): Target[] {
+  const haulers: Target[] = [];
+  const networks = [...new Set(targets.map((t) => t.network))].sort((a, b) => a - b);
+  for (const network of networks) {
+    const pickups = targets
+      .map((t, index) => ({ t, index }))
+      .filter(({ t }) => t.network === network && t.dock && HAULER_PICKUPS.includes(t.kind))
+      .sort((a, b) => HAULER_PICKUPS.indexOf(a.t.kind) - HAULER_PICKUPS.indexOf(b.t.kind));
+    if (pickups.length === 0) continue;
+    for (let h = 0; h < cfg.haulersPerTown; h++) {
+      const { t, index } = pickups[h % pickups.length];
+      haulers.push({ col: t.dock!.x, row: t.dock!.y, kind: "hauler", supplies: [], network, home: index });
+    }
+  }
   return haulers;
+}
+
+/**
+ * Which towns a hauler carries between (#121): two towns are neighbours when the shortest walk
+ * between their centres over the terrain passes through no third town or its wall. So a trip
+ * never crosses the map, and leaves and enters by the gaps. A town left with none (every walk
+ * from it passes another town) takes the town it can walk to soonest, both ways round.
+ */
+export function townNeighbours(map: LocalMap, towns: readonly Town[], cfg: LocalMapConfig): number[][] {
+  const neighbours: Set<number>[] = towns.map(() => new Set<number>());
+  const lengths: number[][] = towns.map(() => towns.map(() => Infinity));
+  const outer = (t: Town, c: Cell) => inTown(t, cfg.townRadiusCols * cfg.wallReach, cfg.townRadiusRows * cfg.wallReach, c.x, c.y);
+  for (let a = 0; a < towns.length; a++) {
+    for (let b = a + 1; b < towns.length; b++) {
+      const route = findRoute(towns[a], towns[b], map);
+      if (route === null) continue;
+      lengths[a][b] = lengths[b][a] = route.length;
+      const passes = route.some((c) => towns.some((t, i) => i !== a && i !== b && outer(t, c)));
+      if (passes) continue;
+      neighbours[a].add(b);
+      neighbours[b].add(a);
+    }
+  }
+  towns.forEach((_, a) => {
+    if (neighbours[a].size > 0) return;
+    const nearest = lengths[a].indexOf(Math.min(...lengths[a]));
+    if (lengths[a][nearest] === Infinity) return;
+    neighbours[a].add(nearest);
+    neighbours[nearest].add(a);
+  });
+  return neighbours.map((n) => [...n].sort((x, y) => x - y));
 }
 
 /** Straight-line distance from a point to the segment between two cells. */

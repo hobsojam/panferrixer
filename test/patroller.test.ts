@@ -18,7 +18,7 @@ import {
   type DashboardState,
   type World,
 } from "../src/dashboard";
-import { generateWorld, type Target } from "../src/local-map";
+import { generateWorld, isEnemyKind, type Target } from "../src/local-map";
 import { cellKey, findRoute, isPassable, reachableFrom } from "../src/route";
 import { dashboardOf, mapOf } from "./helpers";
 
@@ -88,7 +88,7 @@ describe("placing the patrollers", () => {
       expect(patrollers.length, `seed ${seed}`).toBeGreaterThan(segments); // almost every segment gets its full share
       expect(patrollers.length).toBeLessThanOrEqual(segments * cfg.patrollersPerSegment);
       const reached = reachableFrom(towns[0], map);
-      const buildings = new Set(placed.filter((t) => t.kind !== "patroller" && t.kind !== "hunter" && t.kind !== "defender").map((t) => cellKey(map, t.col, t.row)));
+      const buildings = new Set(placed.filter((t) => !isEnemyKind(t.kind)).map((t) => cellKey(map, t.col, t.row)));
       for (const p of patrollers) {
         const beat = p.beat!;
         expect(beat.length).toBeGreaterThanOrEqual(2);

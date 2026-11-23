@@ -17,7 +17,9 @@ The playable prototype currently includes:
 - **The dashboard:** the robot's state-of-mind trace, energy and armour displays, action
   panels, a map, and synthesised sound effects.
 - **One generated world:** ten towns, each the centre of a network with its power station,
-  domes and other buildings, joined by valleys and cut up by impassable high ground.
+  domes and other buildings, joined by valleys and cut up by impassable high ground. Most
+  towns sit inside a mountain arc with one or two gaps, the only ways in for the robot and
+  enemies alike; a couple stay open.
 - **Maps and movement:** local and full-map views, plus pathfinding that walks the robot to a
   chosen reachable cell. Intact buildings block the way; ruins do not.
 - **Missile strikes:** targeting nearby buildings and enemies, then a forward-looking
@@ -43,9 +45,12 @@ The playable prototype currently includes:
   - **Patrollers** walk wide loops between the towns, investigate scans, missile hits and
     power cuts, and run to the nearest armed enemy for help when they see the robot. They are
     lightly armed themselves.
-  - Each network's **hauler** carries cargo round its power station, mines and domes. It never
-    attacks. Seeing the robot, a scan ring that reaches it, or a missile hit nearby sends it
-    fleeing, slower than the robot can walk, and it goes back to its route once nothing has
+  - Each network's **hauler** carries cargo between networks: it loads at a power station or
+    mine, takes the load to a dome in a neighbouring network (out through one wall gap, in
+    through another), loads again there, and moves on. It picks a different neighbour each trip,
+    never straight back if it can help it, and skips networks whose domes are all destroyed. It
+    never attacks. Seeing the robot, a scan ring that reaches it, or a missile hit nearby sends it
+    fleeing, slower than the robot can walk, and it carries on with its trip once nothing has
     scared it for a while. One missile destroys it, and its cargo of energy and armour lies in
     the wreck for the scan and pickup to find.
   - Each role moves at its own pace: the hunter is the fastest of the fighters and the
