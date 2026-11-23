@@ -48,7 +48,8 @@ The playable prototype currently includes:
   - Each network's **hauler** carries cargo between networks: it loads at a power station or
     mine, takes the load to a dome in a neighbouring network (out through one wall gap, in
     through another), loads again there, and moves on. It picks a different neighbour each trip,
-    never straight back if it can help it, and skips networks whose domes are all destroyed. It
+    never straight back if it can help it, carries to whichever has the least supply in stock,
+    and skips networks whose domes are all destroyed. It
     never attacks. Seeing the robot, a scan ring that reaches it, or a missile hit nearby sends it
     fleeing, slower than the robot can walk, and it carries on with its trip once nothing has
     scared it for a while. One missile destroys it, and its cargo of energy and armour lies in
@@ -57,6 +58,13 @@ The playable prototype currently includes:
     defender the slowest. The robot can outwalk any of them, except a patroller running for help.
   - Enemies carry a limited magazine and withdraw to an intact dome in their network to rearm
     once it is empty. With every dome there destroyed, they cannot rearm and fall out of the fight.
+- **Replacement:** working domes build destroyed patrollers, haulers and defenders again, one at
+  a time per network, oldest loss first. A build needs an intact dome (a defender's own), the
+  network's power on, and a unit of supply, which haulers deliver; it takes a minute of powered
+  time. A power cut pauses it, and losing the dome loses it. Hunters are never replaced, and caps
+  per network and over the world stop the domes outbuilding the player. A replacement carries no
+  cargo, and building it clears away its old wreck, so salvage first. Killing haulers starves the
+  domes.
 - **Incoming attacks:** a first-person turret defence in which the player turns and fires
   at incoming missiles. Each missile that gets through cracks the armour plate facing it.
   Choosing a target or a walk point stops time, so there is always a chance to strike back.
