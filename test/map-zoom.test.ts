@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
-import { createDashboardState, stepDashboard, worldFor, type Action, type DashboardState } from "../src/dashboard";
+import { createDashboardState, networkMarkers, openWindow, stepDashboard, worldFor, type Action, type DashboardState } from "../src/dashboard";
 
 const DT = 1 / 60;
 const world = worldFor(config);
@@ -42,5 +42,23 @@ describe("selecting the map panel", () => {
     let s = step(createDashboardState(config), ["right", "right", "activate", "left", "left", "activate"]);
     expect(s.zoom).toBe("full");
     expect(s.mode).toBe("moving");
+  });
+});
+
+describe("the full map marks each network by its power station (#90)", () => {
+  it("one marker per network, on that network's power station", () => {
+    const markers = networkMarkers(createDashboardState(config), world);
+    expect(markers.map((m) => m.network)).toEqual(world.towns.map((_, i) => i));
+    for (const m of markers) {
+      const station = world.targets.find((t) => t.kind === "power" && t.network === m.network)!;
+      expect({ col: m.col, row: m.row }).toEqual({ col: station.col, row: station.row });
+    }
+  });
+
+  it("a network whose power is cut is marked down until the power returns, and only that one", () => {
+    const cut = openWindow(createDashboardState(config), 3, world);
+    expect(networkMarkers(cut, world).filter((m) => m.down).map((m) => m.network)).toEqual([3]);
+    const back = { ...cut, time: cut.suppressedUntil[3] };
+    expect(networkMarkers(back, world).some((m) => m.down)).toBe(false);
   });
 });
