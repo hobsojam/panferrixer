@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { updateApp } from "../src/app";
 import { config } from "../src/config";
 import { createDashboardState, worldFor } from "../src/dashboard";
-import { generateWorld, type World } from "../src/local-map";
+import { generateWorld, isBossKind, type World } from "../src/local-map";
 
 // Difficulty by distance (design-notes 4.5): further from the start, hunters jam and defenders
 // carry point defence. Nothing is upgraded in place: it is decided when the world is made.
@@ -34,7 +34,7 @@ describe("hardened machines", () => {
 
   it("hunters jam, defenders carry point defence, and only far defenders may also jam", () => {
     for (const w of worlds) {
-      for (const t of w.targets.filter((x) => x.defences)) {
+      for (const t of w.targets.filter((x) => x.defences && !isBossKind(x.kind))) {
         if (t.kind === "hunter") expect(t.defences).toEqual({ jammer: true });
         else {
           expect(t.kind).toBe("defender");

@@ -488,6 +488,14 @@ Author's idea: the player has a defensive gun (working name: CIWS, as on ships);
   - Engagement and timers: the shield window keeps running during an engagement (decided).
 - **Controls:** keyboard only for the defence mini-game, as for the rest of the game. The mouse option in section 4.8 is not wanted for now.
 
+### 4.15 Bosses, as built (#71)
+Two machines of the installation's own, named by what they do (section 4.13). They are not the original's two boss characters: no defector, no enemy leader. Values are placeholders in `config.ts`.
+- **Endgame only (decided, author):** neither is in the world until all the parts are collected. Then each appears at its place once the robot is more than 15 cells away, so never in view. Meeting the final boss at the start makes no sense.
+- **Trigger (resolves beacon versus comms):** a comms centre, intact and with its network's power on, reports the robot on entry to its network and every 15 seconds it stays. Destroying the centre or cutting the power silences it. The local map shows REPORTED BY COMMS. A network without a comms centre never reports, and no centre reports until a boss is out to hear it.
+- **Listener:** wanders between neighbouring networks, pausing at each. A report anywhere, or a scan within 24 cells, sends it to search that spot. It fights if it sees the robot, and loses it beyond 12 cells. It jams.
+- **Assessor:** tours the neighbouring network it has gone longest without visiting. A report, or seeing the robot, alerts it for good: it pursues across networks at 1.4 cells a second, over passable ground only. Point defence, four volleys.
+- Both start in the two towns furthest from the start, keep their calm roaming out of the start town, die to one hit, and are never replaced. Instead of a magazine, each waits 20 seconds between attacks. Wrecks always hold some energy, armour and missiles (author), the assessor's most.
+
 ## 5. Proof of concept plan
 - One network's worth: a handful of domes plus a power plant, one enemy type (a patroller), and the full missile loop (select, launch, guide, hit, drop, pick up). [Author-direction]
 - Verbs: Move, Scan, Missile first; add the grid-disabler when shielded domes arrive. Piece collection is automatic.

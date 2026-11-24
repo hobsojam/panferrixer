@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
-import { generateWorld, isEnemyKind } from "../src/local-map";
+import { generateWorld, isBossKind, isEnemyKind } from "../src/local-map";
 import { cellKey, findRoute, findRouteToAny, isPassable, OFFSETS } from "../src/route";
 import { MANY_WORLDS_TIMEOUT_MS, mapOf } from "./helpers";
 
@@ -108,6 +108,6 @@ describe("the world leaves a passable path", () => {
   it("every network still gets all its buildings and its hunter", () => {
     const { towns, targets } = generateWorld(config.localMap);
     const perTown = 2 + config.localMap.domesPerTown + config.localMap.otherBuildingsPerTown;
-    expect(targets.filter((t) => t.kind !== "defender" && t.kind !== "patroller" && t.kind !== "hauler").length).toBe(towns.length * perTown);
+    expect(targets.filter((t) => t.kind !== "defender" && t.kind !== "patroller" && t.kind !== "hauler" && !isBossKind(t.kind)).length).toBe(towns.length * perTown);
   });
 });

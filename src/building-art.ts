@@ -359,13 +359,107 @@ const DEFENDER: LineArt = {
   },
 };
 
-/**
- * The enemy roles. Only the hunter is in the game so far; the others have art ready for
- * when they arrive (#16). A boss is added by giving it a role and an entry in ART.
- */
-export type EnemyRole = "hunter" | "patroller" | "hauler" | "defender";
+// Listener: a wide horn and a ring of wire on a tall tripod, with a small drum at the middle.
+const LISTENER_HORN = closed([
+  [-0.1, -0.62],
+  [0.55, -1],
+  [0.8, -0.5],
+]);
+const LISTENER_DRUM = closed([
+  [-0.45, -0.62],
+  [-0.1, -0.72],
+  [0.2, -0.45],
+  [-0.3, -0.4],
+]);
+const LISTENER_LEGS: Stroke = [
+  [-0.8, 0],
+  [-0.1, -0.42],
+  [0.75, 0],
+];
+const LISTENER_MIDLEG: Stroke = [
+  [-0.1, -0.42],
+  [-0.05, 0],
+];
 
-export const ENEMY_ROLES: readonly EnemyRole[] = ["hunter", "patroller", "hauler", "defender"];
+const LISTENER: LineArt = {
+  full: {
+    horn: LISTENER_HORN,
+    drum: LISTENER_DRUM,
+    legs: LISTENER_LEGS,
+    midLeg: LISTENER_MIDLEG,
+    loop: arc(-0.62, -0.72, 0.22, 0.22, 0, 2 * Math.PI, 16),
+    throat: [
+      [0.1, -0.6],
+      [0.66, -0.76],
+    ],
+    brace: [
+      [-0.45, -0.2],
+      [0.33, -0.2],
+    ],
+  },
+  simple: {
+    horn: LISTENER_HORN,
+    drum: LISTENER_DRUM,
+    legs: LISTENER_LEGS,
+    midLeg: LISTENER_MIDLEG,
+  },
+};
+
+// Assessor: a tall gantry striding on two splayed frames, with a slab of a head hung between them.
+const ASSESSOR_BEAM = closed([
+  [-0.9, -0.85],
+  [-0.9, -1],
+  [0.9, -1],
+  [0.9, -0.85],
+]);
+const ASSESSOR_FRAME_L = closed([
+  [-0.75, -0.85],
+  [-1.1, 0],
+  [-0.65, 0],
+]);
+const ASSESSOR_FRAME_R = closed([
+  [0.75, -0.85],
+  [0.65, 0],
+  [1.1, 0],
+]);
+const ASSESSOR_HEAD = closed([
+  [-0.4, -0.85],
+  [-0.4, -0.4],
+  [0, -0.25],
+  [0.4, -0.4],
+  [0.4, -0.85],
+]);
+
+const ASSESSOR: LineArt = {
+  full: {
+    beam: ASSESSOR_BEAM,
+    frameL: ASSESSOR_FRAME_L,
+    frameR: ASSESSOR_FRAME_R,
+    head: ASSESSOR_HEAD,
+    lens: arc(0, -0.58, 0.14, 0.14, 0, 2 * Math.PI, 14),
+    tubeL: [
+      [-0.28, -0.78],
+      [-0.28, -0.48],
+    ],
+    tubeR: [
+      [0.28, -0.78],
+      [0.28, -0.48],
+    ],
+  },
+  simple: {
+    beam: ASSESSOR_BEAM,
+    frameL: ASSESSOR_FRAME_L,
+    frameR: ASSESSOR_FRAME_R,
+    head: ASSESSOR_HEAD,
+  },
+};
+
+/**
+ * The enemy roles. A new one is added by giving it a role and an entry in ART.
+ */
+export type EnemyRole = "hunter" | "patroller" | "hauler" | "defender" | "listener" | "assessor";
+
+export const ENEMY_ROLES: readonly EnemyRole[] = ["hunter", "patroller", "hauler", "defender", "listener", "assessor"];
 
 /** Art for everything that can be drawn as a target: each building kind and each enemy role. */
 export const ART: Record<TargetKind | EnemyRole, LineArt> = {
@@ -377,6 +471,8 @@ export const ART: Record<TargetKind | EnemyRole, LineArt> = {
   patroller: PATROLLER,
   hauler: HAULER,
   defender: DEFENDER,
+  listener: LISTENER,
+  assessor: ASSESSOR,
 };
 
 export function hasArt(kind: string): kind is TargetKind | EnemyRole {

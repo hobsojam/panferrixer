@@ -65,6 +65,12 @@ The playable prototype currently includes:
   per network and over the world stop the domes outbuilding the player. A replacement carries no
   cargo, and building it clears away its old wreck, so salvage first. Killing haulers starves the
   domes.
+- **Two bosses,** one of each and never replaced. They come out once every part has been collected,
+  and roam between networks. While either stands, a comms centre reports the robot while it is in that network, until the centre is destroyed or its power cut.
+  - The **listener** wanders and pauses. It goes to search wherever a report or a scan came from,
+    and can be shaken off. It jams missiles.
+  - The **assessor** tours the networks until a report or the sight of the robot alerts it. Then
+    it pursues the robot for good, slowly. It has point defence and fires more volleys.
 - **Incoming attacks:** a first-person turret defence in which the player turns and fires
   at incoming missiles. Each missile that gets through cracks the armour plate facing it.
   Choosing a target or a walk point stops time, so there is always a chance to strike back.
