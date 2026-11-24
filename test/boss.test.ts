@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createAppState, updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
+import { latestEvent } from "../src/events";
 import {
   bossMindOf,
   createDashboardState,
@@ -45,6 +46,8 @@ function run(s: DashboardState, seconds: number, each: (s: DashboardState) => vo
   }
   return next;
 }
+
+const lastReport = (s: DashboardState) => latestEvent(s.events, "robotReported");
 
 function onHighGround(s: DashboardState, i: number): boolean {
   const p = positionOf(s, i, world);
@@ -129,19 +132,19 @@ describe("calm roaming", () => {
 describe("comms reports", () => {
   it("alert the assessor and send the listener to search, and repeat on an interval", () => {
     const s = run(state({ pos: IN_TOWN }), NOTICE);
-    expect(s.lastReport).toMatchObject({ network: REPORTING, at: IN_TOWN });
+    expect(lastReport(s)).toMatchObject({ network: REPORTING, at: IN_TOWN });
     expect(s.alerted).toContain(ASSESSOR);
     expect(bossMindOf(s, LISTENER, world).look).not.toBeNull();
-    const first = s.lastReport!.time;
-    expect(run(s, d.commsReportSeconds - 1).lastReport!.time).toBe(first);
-    expect(run(s, d.commsReportSeconds + 1).lastReport!.time).toBeGreaterThan(first);
+    const first = lastReport(s)!.time;
+    expect(lastReport(run(s, d.commsReportSeconds - 1))!.time).toBe(first);
+    expect(lastReport(run(s, d.commsReportSeconds + 1))!.time).toBeGreaterThan(first);
   });
 
   it("are not made by a destroyed comms centre, one without power, or with the robot outside", () => {
     const silenced = world.targets.flatMap((t, i) => (t.kind === "commsCentre" && t.network === REPORTING ? [i] : []));
-    expect(run(state({ pos: IN_TOWN, ruins: silenced }), NOTICE).lastReport).toBeNull();
-    expect(run(state({ pos: IN_TOWN, suppressedUntil: { [REPORTING]: 100 } }), NOTICE).lastReport).toBeNull();
-    expect(run(state(), NOTICE).lastReport).toBeNull();
+    expect(lastReport(run(state({ pos: IN_TOWN, ruins: silenced }), NOTICE))).toBeNull();
+    expect(lastReport(run(state({ pos: IN_TOWN, suppressedUntil: { [REPORTING]: 100 } }), NOTICE))).toBeNull();
+    expect(lastReport(run(state(), NOTICE))).toBeNull();
   });
 });
 
@@ -152,7 +155,7 @@ describe("a call for support", () => {
 
   it("alerts the network's hunter all game, and no other enemy", () => {
     const s = due();
-    expect(s.lastReport).not.toBeNull();
+    expect(lastReport(s)).not.toBeNull();
     expect(s.alerted).toEqual([HUNTER]);
     expect(s.bosses).toEqual({});
   });
@@ -169,12 +172,12 @@ describe("a call for support", () => {
 
   it("waits out the notice, which starts again after leaving or a power cut", () => {
     const early = run(inTown(), d.commsNoticeSeconds - 1);
-    expect(early.lastReport).toBeNull();
-    expect(run(early, 1.2).lastReport).not.toBeNull();
+    expect(lastReport(early)).toBeNull();
+    expect(lastReport(run(early, 1.2))).not.toBeNull();
     const left = run({ ...early, pos: FAR }, DT);
-    expect(run({ ...left, pos: IN_TOWN }, d.commsNoticeSeconds - 1).lastReport).toBeNull();
+    expect(lastReport(run({ ...left, pos: IN_TOWN }, d.commsNoticeSeconds - 1))).toBeNull();
     const cut = run({ ...early, suppressedUntil: { [REPORTING]: early.time + 1 } }, d.commsNoticeSeconds - 1);
-    expect(cut.lastReport).toBeNull();
+    expect(lastReport(cut)).toBeNull();
   });
 });
 

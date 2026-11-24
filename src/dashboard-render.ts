@@ -1,3 +1,4 @@
+import { latestEvent } from "./events";
 import { cracksOn, plateToMend, standing } from "./armour";
 import { ART, fittingStrokes, hasArt, strokeArt } from "./building-art";
 import type { Config } from "./config";
@@ -371,7 +372,8 @@ function drawLocalMap(
 
   drawText(ctx, "LOCAL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
   // A comms centre has just reported the robot (#71).
-  if (state.lastReport !== null && state.time - state.lastReport.time < REPORT_WARNING_SECONDS) {
+  const report = latestEvent(state.events, "robotReported");
+  if (report !== null && state.time - report.time < REPORT_WARNING_SECONDS) {
     drawText(ctx, "REPORTED BY COMMS", x + w - 6, y + 8, 11, c.alert, 1, "monospace", "right");
   }
 }

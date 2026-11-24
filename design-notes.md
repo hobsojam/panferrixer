@@ -496,6 +496,12 @@ Two machines of the installation's own, named by what they do (section 4.13). Th
 - **Assessor:** tours the neighbouring network it has gone longest without visiting. A report, or seeing the robot, alerts it for good: it pursues across networks at 1.4 cells a second, over passable ground only. Point defence, four volleys.
 - Both start in the two towns furthest from the start, keep their calm roaming out of the start town, die to one hit, and are never replaced. Instead of a magazine, each waits 20 seconds between attacks. Wrecks always hold some energy, armour and missiles (author), the assessor's most.
 
+### 4.16 Game events, as built (#127)
+The rules record what happens as data (`src/events.ts`): enemy alerted, help called, under fire, enemy destroyed, replacement begun, robot reported, boss out, assessor reached a town. Nothing shows them yet except REPORTED BY COMMS; the signal decoder (#126) will.
+- Each is recorded once, when something changes. It carries its time, place, network and the enemy concerned.
+- The log is numbered and holds the latest 256. A reader remembers the number it has read up to, so events from a flight or an attack wait for it. Nothing calls listeners in the middle of an update, so the game stays deterministic.
+- Enemies are numbered within their role ("patrol 3"). A replacement keeps its number.
+
 ## 5. Proof of concept plan
 - One network's worth: a handful of domes plus a power plant, one enemy type (a patroller), and the full missile loop (select, launch, guide, hit, drop, pick up). [Author-direction]
 - Verbs: Move, Scan, Missile first; add the grid-disabler when shielded domes arrive. Piece collection is automatic.

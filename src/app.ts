@@ -9,6 +9,7 @@ import {
   isPaused,
   isShielded,
   leaveTargeting,
+  destroyEnemy,
   markRuin,
   moveHunters,
   networkOf,
@@ -217,7 +218,7 @@ function updateLive(state: LiveState, input: AppInput, dt: number, cfg: Config, 
     : timed;
   // An enemy is destroyed the moment it is hit (it has no shield), so it stops where it was struck
   // while the result shows, and its wreck, with any cargo, lies there (#67).
-  const heard = struck && isEnemyKind(state.target.kind) ? markRuin(scared, state.targetIndex) : scared;
+  const heard = struck && isEnemyKind(state.target.kind) ? destroyEnemy(scared, state.targetIndex, world) : scared;
   // A hit on a power station takes its network's shields down. The station itself survives.
   if (struck && state.target.kind === "power") {
     return { ...state, dashboard: openWindow(heard, networkOf(state.target), world), flight };

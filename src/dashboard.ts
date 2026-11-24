@@ -1,6 +1,7 @@
 import type { Config } from "./config";
 import { generateWorld, HAULER_PICKUPS, inTown, isArmedHelper, isBossKind, isEnemyKind, townCentres, walkedCells, type LocalMap, type Supply, type Target, type TargetKind, type Town } from "./local-map";
 import { createRng } from "./rng";
+import { EMPTY_LOG, record, type EventLog, type GameEventBody } from "./events";
 import { allWhole, fullPlates, mendWeakest, plateToMend } from "./armour";
 import { canWalk, reachableGoal, stepToward } from "./enemy-move";
 import { cellKey, findRoute, findRouteToAny, isPassable, OFFSETS, walkPoint, type Blocked } from "./route";
@@ -163,8 +164,8 @@ export interface DashboardState {
   heldAttacks: number[];
   // What each patroller is doing (#66). Missing means it is on its beat, heading for its second waypoint.
   patrollers: Record<number, PatrollerMind>;
-  // Every call for help a patroller has raised, oldest first: observable by game logic and tests.
-  helpCalls: HelpCall[];
+  // What has happened lately (#127), for messages and tests.
+  events: EventLog;
   // What each hauler is doing (#67, #121). Missing means it is at its first pickup, about to load.
   haulers: Record<number, HaulerMind>;
   // Replacement (#70). Each network's supplies; missing means it still has its starting stock.
@@ -183,15 +184,6 @@ export interface DashboardState {
   commsWatch: Record<number, number>;
   // Dashboard time at which each network's comms centre can next report the robot.
   reportReadyAt: Record<number, number>;
-  // The last time a comms centre reported the robot, for the map's warning; null if never.
-  lastReport: CommsReport | null;
-}
-
-/** A comms centre reported the robot in its network (#71). */
-export interface CommsReport {
-  network: number;
-  at: Point;
-  time: number;
 }
 
 /** A boss's state of mind (#71): the town it is heading for, and for the listener where it is searching. */
@@ -246,13 +238,6 @@ export interface PatrollerMind {
   helper: number | null; // the enemy it is fetching
   seen: Point | null; // where it saw the robot: help must be able to fight there
   anchor: Point | null; // where it started fighting
-}
-
-/** A patroller reached an armed enemy and alerted it to the robot. */
-export interface HelpCall {
-  patroller: number;
-  helper: number;
-  time: number;
 }
 
 /** An enemy sent to rearm: it walks to the free cell beside a dome, stays a while, then goes home. */
@@ -395,7 +380,7 @@ export function createDashboardState(cfg: Config): DashboardState {
     awake: [],
     heldAttacks: [],
     patrollers: {},
-    helpCalls: [],
+    events: EMPTY_LOG,
     haulers: {},
     stock: {},
     builds: {},
@@ -405,7 +390,6 @@ export function createDashboardState(cfg: Config): DashboardState {
     bosses: {},
     commsWatch: {},
     reportReadyAt: {},
-    lastReport: null,
   };
 }
 
@@ -523,6 +507,16 @@ export function cellOf(s: DashboardState, index: number, world: World): Cross {
   return { col: Math.round(p.x), row: Math.round(p.y) };
 }
 
+/** Records an event (#127). It happened now, at `at`, in `network`. */
+function emit(s: DashboardState, event: GameEventBody, network: number, at: Point): DashboardState {
+  return { ...s, events: record(s.events, { ...event, time: s.time, network, at }) };
+}
+
+/** Records an event about an enemy, where it stands, in its own network. */
+function emitEnemy(s: DashboardState, event: GameEventBody & { enemy: number }, world: World): DashboardState {
+  return emit(s, event, world.targets[event.enemy].network, positionOf(s, event.enemy, world));
+}
+
 /** True for a target that is a building. Hunters and defenders are enemies, not buildings. */
 export function isBuilding(t: Target): boolean {
   return !isEnemyKind(t.kind);
@@ -614,7 +608,8 @@ export function alertTo(s: DashboardState, indices: readonly number[], world: Wo
   if (fresh.length === 0) return s;
   const patrolling = { ...s.patrolling };
   for (const i of fresh) delete patrolling[i];
-  return { ...s, alerted: [...s.alerted, ...fresh], hunterReadyAt: delayFirstAttacks(s, fresh, world), patrolling };
+  const alerted = { ...s, alerted: [...s.alerted, ...fresh], hunterReadyAt: delayFirstAttacks(s, fresh, world), patrolling };
+  return fresh.reduce((next, enemy) => emitEnemy(next, { kind: "enemyAlerted", enemy }, world), alerted as DashboardState);
 }
 
 /**
@@ -912,7 +907,7 @@ function startFighting(s: DashboardState, index: number, world: World): Dashboar
 function raiseHelp(s: DashboardState, index: number, helper: number, world: World): DashboardState {
   const woken = isHidden(s, helper, world) ? { ...s, awake: [...s.awake, helper] } : s;
   const helped = alertTo(woken, [helper], world);
-  const called = { ...helped, helpCalls: [...helped.helpCalls, { patroller: index, helper, time: s.time }] };
+  const called = emitEnemy(helped, { kind: "helpCalled", enemy: index, helper }, world);
   return startFighting(called, index, world);
 }
 
@@ -1092,6 +1087,7 @@ function stepProduction(s: DashboardState, world: World, dt: number): DashboardS
         stock: { ...next.stock, [network]: stockOf(next, network, world) - 1 },
         builds: { ...next.builds, [network]: { target: index, dome, progress: 0 } },
       };
+      next = emit(next, { kind: "buildStarted", enemy: index, dome }, network, positionOf(next, dome, world));
       break;
     }
   }
@@ -1372,7 +1368,9 @@ function releaseBosses(s: DashboardState, world: World): DashboardState {
   const out = world.targets.flatMap((t, i) =>
     isBossKind(t.kind) && !s.bossesOut.includes(i) && distanceTo(s.pos, t.col, t.row) > world.bossEmergeCells ? [i] : []
   );
-  return out.length === 0 ? s : { ...s, bossesOut: [...s.bossesOut, ...out] };
+  if (out.length === 0) return s;
+  const released: DashboardState = { ...s, bossesOut: [...s.bossesOut, ...out] };
+  return out.reduce((next, enemy) => emitEnemy(next, { kind: "bossOut", enemy }, world), released);
 }
 
 /**
@@ -1403,8 +1401,8 @@ export function reportRobot(s: DashboardState, world: World): DashboardState {
     next = {
       ...next,
       reportReadyAt: { ...next.reportReadyAt, [t.network]: next.time + world.commsReportSeconds },
-      lastReport: { network: t.network, at, time: next.time },
     };
+    next = emit(next, { kind: "robotReported" }, t.network, at);
     const called = world.targets.flatMap((b, i) => {
       const answers = b.kind === "assessor" || (b.kind === "hunter" && b.network === t.network);
       return answers && !s.ruins.includes(i) && !isHidden(s, i, world) ? [i] : [];
@@ -1465,7 +1463,10 @@ function stepBoss(s: DashboardState, index: number, world: World, dt: number): D
   if (here.x !== town.x || here.y !== town.y) return moveBoss(next, index, town, speed, world);
   if (listener && mind.waitUntil === null) return withBossMind(next, index, { ...mind, waitUntil: next.time + world.listenerPauseSeconds });
   if (listener && next.time < (mind.waitUntil ?? 0)) return next;
-  return withBossMind(next, index, nextTown(index, mind, listener, world));
+  const onward = nextTown(index, mind, listener, world);
+  // With nowhere else to go it stays, and has not reached anywhere new.
+  if (!listener && onward.town !== mind.town) next = emit(next, { kind: "townReached", enemy: index }, mind.town, here);
+  return withBossMind(next, index, onward);
 }
 
 /**
@@ -1643,6 +1644,12 @@ export function markRuin(state: DashboardState, index: number): DashboardState {
   return { ...state, ruins: [...state.ruins, index] };
 }
 
+/** A missile has hit an enemy: it is a wreck where it stands, and its destruction is recorded (#127). */
+export function destroyEnemy(s: DashboardState, index: number, world: World): DashboardState {
+  if (s.ruins.includes(index)) return s;
+  return emitEnemy(markRuin(s, index), { kind: "enemyDestroyed", enemy: index }, world);
+}
+
 export function selectedVerb(state: DashboardState): Verb {
   return VERB_GRID[state.row][state.col];
 }
@@ -1687,6 +1694,7 @@ export function stepDashboard(state: DashboardState, actions: readonly Action[],
         // Every launch uses a missile from the rack, whatever the flight's outcome.
         fire = world.targets[s.target];
         s = { ...s, missiles: s.missiles - 1 };
+        if (isEnemyKind(fire.kind)) s = emitEnemy(s, { kind: "underFire", enemy: s.target! }, world);
       }
     } else {
       s = moveCross(s, action, world);
