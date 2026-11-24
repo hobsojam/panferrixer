@@ -267,7 +267,8 @@ export const config = {
     bossEmergeCells: 15, // once every part is found, a boss appears only with the robot this far off: outside the local view
     bossSightCells: 5, // like every enemy, both are always looking
     bossAttackIntervalSeconds: 20, // neither has a magazine: each waits this long after an attack before its next
-    commsReportSeconds: 15, // while the robot stays in a network, its comms centre reports it this often
+    commsNoticeSeconds: 5, // the robot is in a network this long before its comms centre first reports it
+    commsReportSeconds: 30, // while it stays, the centre reports it this often
     assessorVolleys: 4, // volleys per attack, against a hunter's three
     startClearanceCells: 2, // the robot starts at least this far outside a town and beyond any hunter's sight
     targetIconWidth: 16, // on-screen width of a target icon, in pixels

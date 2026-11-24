@@ -92,6 +92,7 @@ export interface World {
   bossEmergeCells: number;
   bossSightCells: number;
   bossAttackIntervalSeconds: number;
+  commsNoticeSeconds: number;
   commsReportSeconds: number;
   startTown: number; // roaming bosses keep clear of the town where the robot begins
   startingStock: number; // supplies each network holds at the start (#70)
@@ -178,6 +179,8 @@ export interface DashboardState {
   bossesOut: number[];
   // What each boss is doing (#71). Missing means it has just set out from where it was placed.
   bosses: Record<number, BossMind>;
+  // Dashboard time since which each network's working comms centre has had the robot in its network.
+  commsWatch: Record<number, number>;
   // Dashboard time at which each network's comms centre can next report the robot.
   reportReadyAt: Record<number, number>;
   // The last time a comms centre reported the robot, for the map's warning; null if never.
@@ -333,6 +336,7 @@ export function worldFor(cfg: Config): World {
       bossEmergeCells: cfg.dashboard.bossEmergeCells,
       bossSightCells: cfg.dashboard.bossSightCells,
       bossAttackIntervalSeconds: cfg.dashboard.bossAttackIntervalSeconds,
+      commsNoticeSeconds: cfg.dashboard.commsNoticeSeconds,
       commsReportSeconds: cfg.dashboard.commsReportSeconds,
       startTown: cfg.localMap.startTown,
       startingStock: cfg.dashboard.startingStock,
@@ -399,6 +403,7 @@ export function createDashboardState(cfg: Config): DashboardState {
     replaced: [],
     bossesOut: [],
     bosses: {},
+    commsWatch: {},
     reportReadyAt: {},
     lastReport: null,
   };
@@ -1371,17 +1376,28 @@ function releaseBosses(s: DashboardState, world: World): DashboardState {
 }
 
 /**
- * Comms centres report the robot (#71): one that is intact, with its network's power on, reports
- * while the robot is in its network, on entry and then every commsReportSeconds. A report alerts
- * the assessor for good, and gives the listener a place to search. With no boss out to hear it,
- * there is no report.
+ * Comms centres call for support (#71): one that is intact, with its network's power on, reports
+ * the robot once it has been in the network for commsNoticeSeconds, and every commsReportSeconds
+ * while it stays. Leaving, or silencing the centre, starts the notice again. The network's hunter
+ * is alerted, and patrollers within earshot come to look. A boss that is out answers too: the
+ * assessor is alerted for good, and the listener goes to search.
  */
 export function reportRobot(s: DashboardState, world: World): DashboardState {
-  if (!s.bossesOut.some((i) => !s.ruins.includes(i))) return s;
   let next = s;
   world.targets.forEach((t, index) => {
-    if (t.kind !== "commsCentre" || next.ruins.includes(index) || isSuppressed(next, t.network)) return;
-    if (!world.towns[t.network] || !inNetwork(next.pos, t, world)) return;
+    if (t.kind !== "commsCentre" || next.ruins.includes(index) || !world.towns[t.network]) return;
+    if (isSuppressed(next, t.network) || !inNetwork(next.pos, t, world)) {
+      if (next.commsWatch[t.network] === undefined) return;
+      const { [t.network]: _gone, ...commsWatch } = next.commsWatch;
+      next = { ...next, commsWatch };
+      return;
+    }
+    const since = next.commsWatch[t.network];
+    if (since === undefined) {
+      next = { ...next, commsWatch: { ...next.commsWatch, [t.network]: next.time } };
+      return;
+    }
+    if (next.time - since < world.commsNoticeSeconds) return;
     if (next.time < (next.reportReadyAt[t.network] ?? 0)) return;
     const at = { ...next.pos };
     next = {
@@ -1389,8 +1405,12 @@ export function reportRobot(s: DashboardState, world: World): DashboardState {
       reportReadyAt: { ...next.reportReadyAt, [t.network]: next.time + world.commsReportSeconds },
       lastReport: { network: t.network, at, time: next.time },
     };
-    const assessors = world.targets.flatMap((b, i) => (b.kind === "assessor" && !s.ruins.includes(i) && !isHidden(s, i, world) ? [i] : []));
-    next = signalListener(alertTo(next, assessors, world), at, Infinity, world);
+    const called = world.targets.flatMap((b, i) => {
+      const answers = b.kind === "assessor" || (b.kind === "hunter" && b.network === t.network);
+      return answers && !s.ruins.includes(i) && !isHidden(s, i, world) ? [i] : [];
+    });
+    const alerted = disturbPatrollers(alertTo(next, called, world), at, world.patrollerHearingCells, world);
+    next = signalListener(alerted, at, Infinity, world);
   });
   return next;
 }

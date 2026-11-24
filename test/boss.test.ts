@@ -7,9 +7,11 @@ import {
   hunterInRange,
   isDisarmed,
   isHidden,
+  mindOf,
   moveHunters,
   positionOf,
   REPLACEABLE,
+  reportRobot,
   spendAttack,
   stepDashboard,
   uncollected,
@@ -26,6 +28,7 @@ const LISTENER = world.targets.findIndex((t) => t.kind === "listener");
 const ASSESSOR = world.targets.findIndex((t) => t.kind === "assessor");
 const COMMS = world.targets.findIndex((t) => t.kind === "commsCentre" && t.network !== config.localMap.startTown);
 const REPORTING = world.targets[COMMS].network;
+const NOTICE = d.commsNoticeSeconds + 0.2;
 const FAR = { x: 1000, y: 1000 }; // a robot nobody can see
 const IN_TOWN = { x: world.towns[REPORTING].x, y: world.towns[REPORTING].y };
 const BOSSES: [string, number][] = [["listener", LISTENER], ["assessor", ASSESSOR]];
@@ -52,11 +55,10 @@ describe("coming out", () => {
   const allParts = Array.from({ length: config.localMap.partCount }, (_, i) => i);
   const before = (from: Partial<DashboardState> = {}) => state({ bossesOut: [], ...from });
 
-  it("is not before every part is collected: no boss is seen, moves, hears or is reported to", () => {
+  it("is not before every part is collected: no boss is seen, moves, hears or answers a report", () => {
     for (const pos of [IN_TOWN, positionOf(state(), LISTENER, world), positionOf(state(), ASSESSOR, world)]) {
       const s = run(before({ pos, parts: allParts.slice(1) }), 20);
       expect(s.bossesOut).toEqual([]);
-      expect(s.lastReport).toBeNull();
       expect(s.bosses).toEqual({});
       for (const [, i] of BOSSES) {
         expect(isHidden(s, i, world)).toBe(true);
@@ -126,7 +128,7 @@ describe("calm roaming", () => {
 
 describe("comms reports", () => {
   it("alert the assessor and send the listener to search, and repeat on an interval", () => {
-    const s = run(state({ pos: IN_TOWN }), DT);
+    const s = run(state({ pos: IN_TOWN }), NOTICE);
     expect(s.lastReport).toMatchObject({ network: REPORTING, at: IN_TOWN });
     expect(s.alerted).toContain(ASSESSOR);
     expect(bossMindOf(s, LISTENER, world).look).not.toBeNull();
@@ -137,9 +139,42 @@ describe("comms reports", () => {
 
   it("are not made by a destroyed comms centre, one without power, or with the robot outside", () => {
     const silenced = world.targets.flatMap((t, i) => (t.kind === "commsCentre" && t.network === REPORTING ? [i] : []));
-    expect(run(state({ pos: IN_TOWN, ruins: silenced }), DT).lastReport).toBeNull();
-    expect(run(state({ pos: IN_TOWN, suppressedUntil: { [REPORTING]: 100 } }), DT).lastReport).toBeNull();
-    expect(run(state(), DT).lastReport).toBeNull();
+    expect(run(state({ pos: IN_TOWN, ruins: silenced }), NOTICE).lastReport).toBeNull();
+    expect(run(state({ pos: IN_TOWN, suppressedUntil: { [REPORTING]: 100 } }), NOTICE).lastReport).toBeNull();
+    expect(run(state(), NOTICE).lastReport).toBeNull();
+  });
+});
+
+describe("a call for support", () => {
+  const HUNTER = world.targets.findIndex((t) => t.kind === "hunter" && t.network === REPORTING);
+  const inTown = (from: Partial<DashboardState> = {}) => state({ bossesOut: [], pos: IN_TOWN, ...from });
+  const due = (from: Partial<DashboardState> = {}) => reportRobot(inTown({ time: 10, commsWatch: { [REPORTING]: 0 }, ...from }), world);
+
+  it("alerts the network's hunter all game, and no other enemy", () => {
+    const s = due();
+    expect(s.lastReport).not.toBeNull();
+    expect(s.alerted).toEqual([HUNTER]);
+    expect(s.bosses).toEqual({});
+  });
+
+  it("draws patrollers within earshot to look", () => {
+    const patroller = world.targets.findIndex((t) => t.kind === "patroller");
+    const s = due({ hunterPos: { [patroller]: { x: IN_TOWN.x + 7, y: IN_TOWN.y } } });
+    expect(mindOf(s, patroller, world).mode).toBe("investigate");
+  });
+
+  it("does not bring a destroyed hunter", () => {
+    expect(due({ ruins: [HUNTER] }).alerted).toEqual([]);
+  });
+
+  it("waits out the notice, which starts again after leaving or a power cut", () => {
+    const early = run(inTown(), d.commsNoticeSeconds - 1);
+    expect(early.lastReport).toBeNull();
+    expect(run(early, 1.2).lastReport).not.toBeNull();
+    const left = run({ ...early, pos: FAR }, DT);
+    expect(run({ ...left, pos: IN_TOWN }, d.commsNoticeSeconds - 1).lastReport).toBeNull();
+    const cut = run({ ...early, suppressedUntil: { [REPORTING]: early.time + 1 } }, d.commsNoticeSeconds - 1);
+    expect(cut.lastReport).toBeNull();
   });
 });
 
@@ -166,7 +201,7 @@ describe("the listener", () => {
   const at = positionOf(state(), LISTENER, world);
 
   it("searches where a report came from, then goes back to roaming", () => {
-    const s = run(state({ pos: IN_TOWN }), DT);
+    const s = run(state({ pos: IN_TOWN }), NOTICE);
     const look = bossMindOf(s, LISTENER, world).look!;
     let arrived = false;
     const end = run({ ...s, pos: FAR, alerted: [] }, 120, (st) => {

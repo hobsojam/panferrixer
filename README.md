@@ -65,8 +65,11 @@ The playable prototype currently includes:
   per network and over the world stop the domes outbuilding the player. A replacement carries no
   cargo, and building it clears away its old wreck, so salvage first. Killing haulers starves the
   domes.
+- **Comms centres** call for support when the robot stays in their network: the network's hunter
+  is alerted, and patrollers nearby come to look. Destroying the centre or cutting its network's
+  power silences it.
 - **Two bosses,** one of each and never replaced. They come out once every part has been collected,
-  and roam between networks. While either stands, a comms centre reports the robot while it is in that network, until the centre is destroyed or its power cut.
+  and roam between networks. A comms centre's report draws them too.
   - The **listener** wanders and pauses. It goes to search wherever a report or a scan came from,
     and can be shaken off. It jams missiles.
   - The **assessor** tours the networks until a report or the sight of the robot alerts it. Then
