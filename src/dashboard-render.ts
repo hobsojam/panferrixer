@@ -14,12 +14,17 @@ const VERB_LABELS: Record<Verb, string> = {
   gridDisable: "GRID DISABLE",
 };
 
+/** How long the map shows that a comms centre has reported the robot. */
+const REPORT_WARNING_SECONDS = 4;
+
 const TARGET_LABELS: Record<Target["kind"], string> = {
   power: "POWER",
   hunter: "HUNTER",
   defender: "DEFENDER",
   patroller: "PATROLLER",
   hauler: "HAULER",
+  listener: "LISTENER",
+  assessor: "ASSESSOR",
   mine: "MINE",
   commsCentre: "COMMS CENTRE",
   dome: "DOME",
@@ -365,6 +370,10 @@ function drawLocalMap(
   ctx.restore();
 
   drawText(ctx, "LOCAL", x + 6, y + 8, 11, c.text, 0.7, "monospace", "left");
+  // A comms centre has just reported the robot (#71).
+  if (state.lastReport !== null && state.time - state.lastReport.time < REPORT_WARNING_SECONDS) {
+    drawText(ctx, "REPORTED BY COMMS", x + w - 6, y + 8, 11, c.alert, 1, "monospace", "right");
+  }
 }
 
 /**

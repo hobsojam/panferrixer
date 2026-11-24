@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { config } from "../src/config";
-import { generateWorld, inTown, townCentres } from "../src/local-map";
+import { generateWorld, inTown, isBossKind, townCentres } from "../src/local-map";
 
 const cfg = config.localMap;
 
@@ -42,7 +42,7 @@ describe("world map", () => {
   it("places targets inside towns and never in valleys", () => {
     const { map, towns, targets } = generateWorld(cfg);
     // Defenders stand beside their dome, which may be just outside the town: see the garrison tests.
-    const placed = targets.filter((t) => t.kind !== "defender" && t.kind !== "patroller" && t.kind !== "hauler");
+    const placed = targets.filter((t) => t.kind !== "defender" && t.kind !== "patroller" && t.kind !== "hauler" && !isBossKind(t.kind));
     expect(placed).toHaveLength(towns.length * (2 + cfg.domesPerTown + cfg.otherBuildingsPerTown));
     for (const target of placed) {
       expect(towns.some((t) => inTown(t, cfg.townRadiusCols, cfg.townRadiusRows, target.col, target.row))).toBe(true);

@@ -64,7 +64,7 @@ export interface Town {
 }
 
 /** Placeholder target kinds: the comms centre replaces the original beacon (design-notes 4.4). Art is not designed yet. */
-export type TargetKind = "power" | "hunter" | "defender" | "patroller" | "hauler" | "mine" | "commsCentre" | "dome";
+export type TargetKind = "power" | "hunter" | "defender" | "patroller" | "hauler" | "listener" | "assessor" | "mine" | "commsCentre" | "dome";
 
 /** The supplies a ruin can hold. Parts are not rolled: they are a fixed set, placed (design-notes 4.4). */
 export type Supply = "energy" | "armour" | "missiles";
@@ -98,7 +98,12 @@ export type Band = "near" | "middle" | "far";
 
 /** True for the enemies: they move, have no shields and are not buildings. */
 export function isEnemyKind(kind: TargetKind): boolean {
-  return kind === "hunter" || kind === "defender" || kind === "patroller" || kind === "hauler";
+  return kind === "hunter" || kind === "defender" || kind === "patroller" || kind === "hauler" || isBossKind(kind);
+}
+
+/** The two bosses (#71): one of each in the world, roaming between networks, never replaced. */
+export function isBossKind(kind: TargetKind): boolean {
+  return kind === "listener" || kind === "assessor";
 }
 
 /** True for the enemies that carry weapons worth calling for help: not the patroller's light guns. */
@@ -434,7 +439,37 @@ function placeTargets(map: LocalMap, towns: Town[], bands: readonly Band[], cfg:
   // Docks and haulers come last, and the haulers' cargo is rolled after everything else's, so no
   // other target moves or changes.
   const docked = placeDocks(map, towns, withPatrollers);
-  return rollSupplies(harden([...docked, ...placeHaulers(docked, cfg)], bands, cfg), cfg);
+  const hauled = harden([...docked, ...placeHaulers(docked, cfg)], bands, cfg);
+  return rollSupplies([...hauled, ...placeBosses(map, towns, hauled, cfg)], cfg);
+}
+
+/**
+ * The bosses (#71): the assessor starts in the town furthest from the start by walking, the
+ * listener in the next furthest, each on the free cell nearest the town's centre. They come last
+ * and draw nothing at random, so no other placement moves. Their defences are fixed: the
+ * assessor has point defence, the listener jams.
+ */
+function placeBosses(map: LocalMap, towns: readonly Town[], targets: readonly Target[], cfg: LocalMapConfig): Target[] {
+  const start = towns[cfg.startTown] ?? towns[0];
+  const blocked = new Set(targets.filter((t) => !isEnemyKind(t.kind)).map((t) => cellKey(map, t.col, t.row)));
+  const taken = new Set(targets.flatMap((t) => [cellKey(map, t.col, t.row), ...(t.dock ? [cellKey(map, t.dock.x, t.dock.y)] : [])]));
+  const reached = reachableFrom(start, map, blocked);
+  const furthest = towns
+    .map((t, network) => ({ network, steps: findRoute(start, t, map)?.length ?? -1 }))
+    .filter((t) => t.network !== cfg.startTown)
+    .sort((a, b) => b.steps - a.steps || a.network - b.network);
+  const bosses: Target[] = [];
+  const place = (kind: TargetKind, network: number, defences: FlightDefences) => {
+    const town = towns[network];
+    const fromCentre = (k: number) => Math.hypot((k % map.cols) - town.x, Math.floor(k / map.cols) - town.y);
+    const cell = [...reached].filter((k) => !taken.has(k)).sort((a, b) => fromCentre(a) - fromCentre(b) || a - b)[0];
+    if (cell === undefined) return;
+    taken.add(cell);
+    bosses.push({ col: cell % map.cols, row: Math.floor(cell / map.cols), kind, supplies: [], network, defences });
+  };
+  if (furthest[1]) place("listener", furthest[1].network, { jammer: true });
+  if (furthest[0]) place("assessor", furthest[0].network, { pointDefence: true });
+  return bosses;
 }
 
 /**

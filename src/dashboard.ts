@@ -1,5 +1,5 @@
 import type { Config } from "./config";
-import { generateWorld, HAULER_PICKUPS, inTown, isArmedHelper, isEnemyKind, townCentres, walkedCells, type LocalMap, type Supply, type Target, type TargetKind, type Town } from "./local-map";
+import { generateWorld, HAULER_PICKUPS, inTown, isArmedHelper, isBossKind, isEnemyKind, townCentres, walkedCells, type LocalMap, type Supply, type Target, type TargetKind, type Town } from "./local-map";
 import { createRng } from "./rng";
 import { allWhole, fullPlates, mendWeakest, plateToMend } from "./armour";
 import { canWalk, reachableGoal, stepToward } from "./enemy-move";
@@ -83,6 +83,18 @@ export interface World {
   haulerHearingCells: number; // a missile hit this close scares it
   haulerFleeCells: number; // how many steps over the terrain it looks for somewhere to flee to
   haulerFleeSeconds: number; // how long it keeps away after it last saw or heard the threat
+  listenerSpeed: number;
+  listenerHearingCells: number;
+  listenerSearchSeconds: number;
+  listenerPauseSeconds: number;
+  listenerLoseCells: number;
+  assessorSpeed: number;
+  bossEmergeCells: number;
+  bossSightCells: number;
+  bossAttackIntervalSeconds: number;
+  commsNoticeSeconds: number;
+  commsReportSeconds: number;
+  startTown: number; // roaming bosses keep clear of the town where the robot begins
   startingStock: number; // supplies each network holds at the start (#70)
   stockMax: number; // the most supplies a network holds: deliveries beyond it are wasted
   replacementSeconds: number; // powered time a dome takes to build a replacement
@@ -163,6 +175,34 @@ export interface DashboardState {
   produced: Record<number, number>;
   // Enemies (target indices) that have been built again at least once: they carry no cargo.
   replaced: number[];
+  // Bosses (target indices) that have come out, once every part was collected (#71).
+  bossesOut: number[];
+  // What each boss is doing (#71). Missing means it has just set out from where it was placed.
+  bosses: Record<number, BossMind>;
+  // Dashboard time since which each network's working comms centre has had the robot in its network.
+  commsWatch: Record<number, number>;
+  // Dashboard time at which each network's comms centre can next report the robot.
+  reportReadyAt: Record<number, number>;
+  // The last time a comms centre reported the robot, for the map's warning; null if never.
+  lastReport: CommsReport | null;
+}
+
+/** A comms centre reported the robot in its network (#71). */
+export interface CommsReport {
+  network: number;
+  at: Point;
+  time: number;
+}
+
+/** A boss's state of mind (#71): the town it is heading for, and for the listener where it is searching. */
+export interface BossMind {
+  town: number;
+  from: number | null;
+  trip: number; // towns reached so far
+  visited: Record<number, number>; // the trip on which each town was last reached
+  waitUntil: number | null; // when the listener ends its pause at a town
+  look: Point | null; // where the listener is going to search
+  lookUntil: number | null; // when it gives up searching; set on arrival
 }
 
 /** A replacement under way (#70): which enemy, which dome is building it, and its powered seconds so far. */
@@ -287,6 +327,18 @@ export function worldFor(cfg: Config): World {
       haulerHearingCells: cfg.dashboard.haulerHearingCells,
       haulerFleeCells: cfg.dashboard.haulerFleeCells,
       haulerFleeSeconds: cfg.dashboard.haulerFleeSeconds,
+      listenerSpeed: cfg.dashboard.listenerSpeed,
+      listenerHearingCells: cfg.dashboard.listenerHearingCells,
+      listenerSearchSeconds: cfg.dashboard.listenerSearchSeconds,
+      listenerPauseSeconds: cfg.dashboard.listenerPauseSeconds,
+      listenerLoseCells: cfg.dashboard.listenerLoseCells,
+      assessorSpeed: cfg.dashboard.assessorSpeed,
+      bossEmergeCells: cfg.dashboard.bossEmergeCells,
+      bossSightCells: cfg.dashboard.bossSightCells,
+      bossAttackIntervalSeconds: cfg.dashboard.bossAttackIntervalSeconds,
+      commsNoticeSeconds: cfg.dashboard.commsNoticeSeconds,
+      commsReportSeconds: cfg.dashboard.commsReportSeconds,
+      startTown: cfg.localMap.startTown,
       startingStock: cfg.dashboard.startingStock,
       stockMax: cfg.dashboard.stockMax,
       replacementSeconds: cfg.dashboard.replacementSeconds,
@@ -349,6 +401,11 @@ export function createDashboardState(cfg: Config): DashboardState {
     builds: {},
     produced: {},
     replaced: [],
+    bossesOut: [],
+    bosses: {},
+    commsWatch: {},
+    reportReadyAt: {},
+    lastReport: null,
   };
 }
 
@@ -474,10 +531,12 @@ export function isBuilding(t: Target): boolean {
 /**
  * True for a defender still asleep in its dome (design-notes 4.4): it is not drawn, cannot be
  * chosen as a target, does not move and does not look. Not knowing which domes are occupied
- * is the point.
+ * is the point. A boss that has not come out yet (#71) is not in the world at all.
  */
 export function isHidden(s: DashboardState, index: number, world: World): boolean {
-  return world.targets[index].kind === "defender" && !s.awake.includes(index);
+  const kind = world.targets[index].kind;
+  if (isBossKind(kind)) return !s.bossesOut.includes(index);
+  return kind === "defender" && !s.awake.includes(index);
 }
 
 /**
@@ -574,11 +633,15 @@ export function alertTo(s: DashboardState, indices: readonly number[], world: Wo
  * leaves it, and rearms at its own post. It never patrols. A defender asleep in its dome does nothing.
  */
 export function moveHunters(s: DashboardState, world: World, dt: number): DashboardState {
-  let next = s;
+  let next = reportRobot(releaseBosses(s, world), world);
   world.targets.forEach((t, index) => {
     if (!isEnemyKind(t.kind) || next.ruins.includes(index) || isHidden(next, index, world)) return;
     if (t.kind === "hauler") {
       next = stepHauler(next, index, world, dt);
+      return;
+    }
+    if (isBossKind(t.kind)) {
+      next = stepBoss(next, index, world, dt);
       return;
     }
     const patroller = t.kind === "patroller";
@@ -949,7 +1012,7 @@ export function disturbPatrollers(s: DashboardState, spot: Point, radius: number
   return next;
 }
 
-/** The enemies a dome can build again once destroyed (#70): never hunters, nor (later) bosses. */
+/** The enemies a dome can build again once destroyed (#70): never hunters or bosses. */
 export const REPLACEABLE: readonly TargetKind[] = ["patroller", "hauler", "defender"];
 
 /** A network's supplies now: what haulers have delivered, less what its domes have built with. */
@@ -1290,8 +1353,147 @@ function moveHauler(s: DashboardState, index: number, goal: Point, distance: num
   return { ...s, hunterPos: { ...s.hunterPos, [index]: pos } };
 }
 
-/** How many attacks an enemy's magazine holds. */
+/** A boss's state of mind; one never seen to change is at the town it was placed in. */
+export function bossMindOf(s: DashboardState, index: number, world: World): BossMind {
+  const town = world.targets[index].network;
+  return s.bosses[index] ?? { town, from: null, trip: 0, visited: {}, waitUntil: null, look: null, lookUntil: null };
+}
+
+function withBossMind(s: DashboardState, index: number, mind: BossMind): DashboardState {
+  return { ...s, bosses: { ...s.bosses, [index]: mind } };
+}
+
+/**
+ * The bosses come out once the robot holds every part (#71): they are the endgame. Each appears
+ * where it was placed, but only while the robot is well away, so never in front of the player.
+ */
+function releaseBosses(s: DashboardState, world: World): DashboardState {
+  if (s.parts.length < world.partCount) return s;
+  const out = world.targets.flatMap((t, i) =>
+    isBossKind(t.kind) && !s.bossesOut.includes(i) && distanceTo(s.pos, t.col, t.row) > world.bossEmergeCells ? [i] : []
+  );
+  return out.length === 0 ? s : { ...s, bossesOut: [...s.bossesOut, ...out] };
+}
+
+/**
+ * Comms centres call for support (#71): one that is intact, with its network's power on, reports
+ * the robot once it has been in the network for commsNoticeSeconds, and every commsReportSeconds
+ * while it stays. Leaving, or silencing the centre, starts the notice again. The network's hunter
+ * is alerted, and patrollers within earshot come to look. A boss that is out answers too: the
+ * assessor is alerted for good, and the listener goes to search.
+ */
+export function reportRobot(s: DashboardState, world: World): DashboardState {
+  let next = s;
+  world.targets.forEach((t, index) => {
+    if (t.kind !== "commsCentre" || next.ruins.includes(index) || !world.towns[t.network]) return;
+    if (isSuppressed(next, t.network) || !inNetwork(next.pos, t, world)) {
+      if (next.commsWatch[t.network] === undefined) return;
+      const { [t.network]: _gone, ...commsWatch } = next.commsWatch;
+      next = { ...next, commsWatch };
+      return;
+    }
+    const since = next.commsWatch[t.network];
+    if (since === undefined) {
+      next = { ...next, commsWatch: { ...next.commsWatch, [t.network]: next.time } };
+      return;
+    }
+    if (next.time - since < world.commsNoticeSeconds) return;
+    if (next.time < (next.reportReadyAt[t.network] ?? 0)) return;
+    const at = { ...next.pos };
+    next = {
+      ...next,
+      reportReadyAt: { ...next.reportReadyAt, [t.network]: next.time + world.commsReportSeconds },
+      lastReport: { network: t.network, at, time: next.time },
+    };
+    const called = world.targets.flatMap((b, i) => {
+      const answers = b.kind === "assessor" || (b.kind === "hunter" && b.network === t.network);
+      return answers && !s.ruins.includes(i) && !isHidden(s, i, world) ? [i] : [];
+    });
+    const alerted = disturbPatrollers(alertTo(next, called, world), at, world.patrollerHearingCells, world);
+    next = signalListener(alerted, at, Infinity, world);
+  });
+  return next;
+}
+
+/** A signal came from `spot` (#71): a listener within `radius` that is not already fighting goes to search there. */
+export function signalListener(s: DashboardState, spot: Point, radius: number, world: World): DashboardState {
+  let next = s;
+  world.targets.forEach((t, index) => {
+    if (t.kind !== "listener" || next.ruins.includes(index) || isHidden(next, index, world) || next.alerted.includes(index)) return;
+    const here = positionOf(next, index, world);
+    if (Math.hypot(spot.x - here.x, spot.y - here.y) > radius) return;
+    const look = lookPoint(next, here, spot, world);
+    if (look === null) return;
+    next = withBossMind(next, index, { ...bossMindOf(next, index, world), look, lookUntil: null, waitUntil: null });
+  });
+  return next;
+}
+
+/**
+ * One step of a boss (#71). Both are alerted by the sight of the robot, close to the hold range
+ * and fight there. The assessor never lets go. The listener loses a robot that gets far enough
+ * away, and searches where it last was. Calm, the listener searches where a signal came from;
+ * otherwise each roams between networks in its own way.
+ */
+function stepBoss(s: DashboardState, index: number, world: World, dt: number): DashboardState {
+  const listener = world.targets[index].kind === "listener";
+  const speed = (listener ? world.listenerSpeed : world.assessorSpeed) * dt;
+  const here = positionOf(s, index, world);
+  const robotDistance = distanceTo(s.pos, here.x, here.y);
+  let next = robotDistance <= world.bossSightCells ? alertTo(s, [index], world) : s;
+
+  if (listener && next.alerted.includes(index) && robotDistance > world.listenerLoseCells) {
+    next = { ...next, alerted: next.alerted.filter((i) => i !== index) };
+    next = signalListener(next, next.pos, Infinity, world);
+  }
+  if (next.alerted.includes(index)) {
+    const inside = buildingCells(next, world).has(cellKey(world.map, Math.round(here.x), Math.round(here.y)));
+    if (robotDistance <= world.hunterHoldCells && !inside) return next;
+    return moveBoss(next, index, { x: Math.round(next.pos.x), y: Math.round(next.pos.y) }, speed, world);
+  }
+
+  const mind = bossMindOf(next, index, world);
+  if (mind.look) {
+    if (here.x !== mind.look.x || here.y !== mind.look.y) return moveBoss(next, index, mind.look, speed, world);
+    if (mind.lookUntil === null) return withBossMind(next, index, { ...mind, lookUntil: next.time + world.listenerSearchSeconds });
+    if (next.time < mind.lookUntil) return next;
+    return withBossMind(next, index, { ...mind, look: null, lookUntil: null });
+  }
+
+  const town = world.towns[mind.town];
+  if (!town) return next;
+  if (here.x !== town.x || here.y !== town.y) return moveBoss(next, index, town, speed, world);
+  if (listener && mind.waitUntil === null) return withBossMind(next, index, { ...mind, waitUntil: next.time + world.listenerPauseSeconds });
+  if (listener && next.time < (mind.waitUntil ?? 0)) return next;
+  return withBossMind(next, index, nextTown(index, mind, listener, world));
+}
+
+/**
+ * Where a roaming boss goes next (#71): a neighbouring town, never the robot's start town, and not
+ * straight back if any other will do. The listener chooses by its trip, so it looks aimless but is
+ * the same every run; the assessor takes the one it has gone longest without visiting.
+ */
+function nextTown(index: number, mind: BossMind, listener: boolean, world: World): BossMind {
+  const trip = mind.trip + 1;
+  const visited = { ...mind.visited, [mind.town]: trip };
+  const open = (world.neighbours[mind.town] ?? []).filter((n) => n !== world.startTown);
+  const onward = open.filter((n) => n !== mind.from);
+  const choices = onward.length > 0 ? onward : open;
+  if (choices.length === 0) return { ...mind, trip, visited, waitUntil: null };
+  const seen = (n: number) => visited[n] ?? 0;
+  const town = listener ? choices[tripHash(index, trip) % choices.length] : choices.reduce((a, b) => (seen(b) < seen(a) ? b : a));
+  return { ...mind, town, from: mind.town, trip, visited, waitUntil: null };
+}
+
+function moveBoss(s: DashboardState, index: number, goal: Point, distance: number, world: World): DashboardState {
+  const pos = stepToward(positionOf(s, index, world), goal, world.map, distance);
+  return { ...s, hunterPos: { ...s.hunterPos, [index]: pos } };
+}
+
+/** How many attacks an enemy's magazine holds. A boss has no magazine (#71). */
 function magazineOf(index: number, world: World): number {
+  const kind = world.targets[index]?.kind;
+  if (kind && isBossKind(kind)) return Infinity;
   return world.targets[index]?.kind === "patroller" ? world.patrollerMagazineAttacks : world.hunterMagazineAttacks;
 }
 
@@ -1310,6 +1512,10 @@ export function isDisarmed(s: DashboardState, index: number, world: World): bool
  * intact dome in its network that it can walk to. With none, it is disarmed (#102).
  */
 export function spendAttack(s: DashboardState, index: number, world: World): DashboardState {
+  if (isBossKind(world.targets[index].kind)) {
+    // A boss never withdraws; its attacks are spaced out instead (#71).
+    return { ...s, hunterReadyAt: { ...s.hunterReadyAt, [index]: s.time + world.bossAttackIntervalSeconds } };
+  }
   const used = (s.attacksUsed[index] ?? 0) + 1;
   const spent = { ...s, attacksUsed: { ...s.attacksUsed, [index]: used } };
   if (used < magazineOf(index, world)) return spent;
@@ -1542,7 +1748,9 @@ function browseAction(s: DashboardState, action: Action, world: World): Dashboar
         world.scanRadius,
         world
       );
-      return { ...heard, zoom: "local", scan: scanFrom(s, world), pulseStarted: s.time };
+      // The listener hears a scan from further than the ring reaches (#71).
+      const traced = signalListener(heard, s.pos, world.listenerHearingCells, world);
+      return { ...traced, zoom: "local", scan: scanFrom(s, world), pulseStarted: s.time };
     }
     if (verb === "gridDisable" && gridDisableReady(s)) {
       // Choose a power station with the cross, the same way as a missile target.

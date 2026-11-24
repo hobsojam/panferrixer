@@ -256,6 +256,20 @@ export const config = {
     replacementSeconds: 60, // powered time to build one: long enough to salvage the wreck first
     replacementsPerNetworkMax: 3, // the most one network builds in a game
     replacementsMax: 12, // the most built over the whole world in a game
+    // Bosses (#71, design-notes 4.15): the listener follows signals, the assessor pursues for good.
+    // Neither is ever replaced. Placeholders until playtested.
+    listenerSpeed: 2, // cells per second
+    listenerHearingCells: 24, // a scan this close draws it in: twice the ring's own reach
+    listenerSearchSeconds: 8, // how long it searches where the signal came from
+    listenerPauseSeconds: 6, // how long it listens at each town on its wander
+    listenerLoseCells: 12, // once fighting, it loses the robot beyond this, and searches where it last was
+    assessorSpeed: 1.4, // cells per second: slow, but it never stops coming
+    bossEmergeCells: 15, // once every part is found, a boss appears only with the robot this far off: outside the local view
+    bossSightCells: 5, // like every enemy, both are always looking
+    bossAttackIntervalSeconds: 20, // neither has a magazine: each waits this long after an attack before its next
+    commsNoticeSeconds: 5, // the robot is in a network this long before its comms centre first reports it
+    commsReportSeconds: 30, // while it stays, the centre reports it this often
+    assessorVolleys: 4, // volleys per attack, against a hunter's three
     startClearanceCells: 2, // the robot starts at least this far outside a town and beyond any hunter's sight
     targetIconWidth: 16, // on-screen width of a target icon, in pixels
   },
@@ -298,6 +312,9 @@ export const config = {
       // The hauler's cargo (#67, design-notes 4.4): power pods are energy, raw material mends armour.
       // Always worth something: it is the reason to run one down. It carries no weapons, so no missiles.
       hauler: { energy: { min: 1, max: 3, chance: 0.5 }, armour: { max: 2, chance: 0.4 } },
+      // Bosses (#71): always some of everything, the assessor most.
+      listener: { energy: { min: 1, max: 3, chance: 0.5 }, armour: { min: 1, max: 2, chance: 0.5 }, missiles: { min: 1, max: 3, chance: 0.5 } },
+      assessor: { energy: { min: 2, max: 4, chance: 0.5 }, armour: { min: 1, max: 3, chance: 0.5 }, missiles: { min: 2, max: 4, chance: 0.5 } },
     },
     // Parts (design-notes 4.4): a fixed set placed over the world, not rolled. Placeholders.
     partCount: 6, // placeholder: one per upgrade, to be decided

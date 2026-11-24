@@ -91,6 +91,13 @@ export function shieldsDuringAttack(dashboard: DashboardState, defence: DefenceS
   return { plates, lastHit };
 }
 
+/** How many volleys an enemy's attack has: a patroller is lightly armed, the assessor heavily. */
+function volleysFor(kind: Target["kind"], cfg: Config): number {
+  if (kind === "patroller") return cfg.dashboard.patrollerVolleys;
+  if (kind === "assessor") return cfg.dashboard.assessorVolleys;
+  return cfg.defence.volleys;
+}
+
 /** How far the robot is from a target, in map cells. A hunter may have moved from its post. */
 function rangeTo(dashboard: DashboardState, index: number, world: World): number {
   const p = positionOf(dashboard, index, world);
@@ -159,7 +166,7 @@ function updateLive(state: LiveState, input: AppInput, dt: number, cfg: Config, 
     const hunter = hunterInRange(dashboard, world, cfg.dashboard.hunterEngageRange);
     if (hunter !== null) {
       // A patroller is lightly armed: one volley, against a hunter's three (#66).
-      const volleys = world.targets[hunter].kind === "patroller" ? cfg.dashboard.patrollerVolleys : cfg.defence.volleys;
+      const volleys = volleysFor(world.targets[hunter].kind, cfg);
       const defence = createDefence(newSeed(), cfg, rangeTo(dashboard, hunter, world), volleys);
       return { screen: "defence", dashboard, defence, attacker: hunter };
     }
