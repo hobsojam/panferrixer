@@ -90,6 +90,7 @@ export interface Target {
   home?: number; // a defender's dome, or the building a hauler starts loading at (target index)
   beat?: Cell[]; // a patroller's loop of waypoints; its col and row are the first, where it starts
   dock?: Cell; // a power station's, mine's or dome's loading cell, where haulers stop (#121); none if it has no free side
+  number?: number; // an enemy's number within its role, for messages (#127); a replacement keeps it
   defences?: FlightDefences; // a hardened enemy's defences against a missile; none for the standard types
 }
 
@@ -440,7 +441,18 @@ function placeTargets(map: LocalMap, towns: Town[], bands: readonly Band[], cfg:
   // other target moves or changes.
   const docked = placeDocks(map, towns, withPatrollers);
   const hauled = harden([...docked, ...placeHaulers(docked, cfg)], bands, cfg);
-  return rollSupplies([...hauled, ...placeBosses(map, towns, hauled, cfg)], cfg);
+  return numberEnemies(rollSupplies([...hauled, ...placeBosses(map, towns, hauled, cfg)], cfg));
+}
+
+/** Numbers the enemies within each role, from 1, in the order they were placed (#127): "patrol 3". */
+function numberEnemies(targets: readonly Target[]): Target[] {
+  const counts = new Map<TargetKind, number>();
+  return targets.map((t) => {
+    if (!isEnemyKind(t.kind)) return t;
+    const number = (counts.get(t.kind) ?? 0) + 1;
+    counts.set(t.kind, number);
+    return { ...t, number };
+  });
 }
 
 /**

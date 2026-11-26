@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
+import { eventsOf } from "../src/events";
 import {
   createDashboardState,
   fleeGoal,
@@ -263,7 +264,7 @@ describe("fleeing", () => {
     const p = positionOf(s, HAULER, world);
     expect(Math.hypot(p.x - s.pos.x, p.y - s.pos.y)).toBeGreaterThan(d.haulerSightCells);
     expect(s.alerted).toEqual([]);
-    expect(s.helpCalls).toEqual([]);
+    expect(eventsOf(s.events, "helpCalled")).toEqual([]);
     expect(hunterInRange({ ...s, breatherUntil: 0 }, world, 100)).toBeNull();
   });
 

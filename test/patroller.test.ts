@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createAppState, updateApp, type AppState } from "../src/app";
 import { config } from "../src/config";
+import { eventsOf } from "../src/events";
 import {
   createDashboardState,
   disturbPatrollers,
@@ -131,7 +132,7 @@ describe("placing the patrollers", () => {
     let s: AppState = createAppState(config);
     for (let i = 0; i < 20 / DT; i++) s = updateApp(s, { actions: [], steering: 0 }, DT, config, () => 1);
     expect(s.screen).toBe("dashboard");
-    expect(dashboardOf(s).helpCalls).toEqual([]);
+    expect(eventsOf(dashboardOf(s).events, "helpCalled")).toEqual([]);
   });
 });
 
@@ -236,8 +237,8 @@ describe("seeing the robot: running for help", () => {
   });
 
   it("on arrival raises help: the helper is alerted, a sleeping defender comes out, and the call is recorded", () => {
-    const s = runUntil(seen(), (x) => x.helpCalls.length > 0);
-    expect(s.helpCalls).toEqual([{ patroller: PATROLLER, helper: DEFENDER, time: expect.any(Number) }]);
+    const s = runUntil(seen(), (x) => eventsOf(x.events, "helpCalled").length > 0);
+    expect(eventsOf(s.events, "helpCalled")).toMatchObject([{ enemy: PATROLLER, helper: DEFENDER }]);
     expect(isHidden(s, DEFENDER, world)).toBe(false);
     expect(s.alerted).toContain(DEFENDER);
     // And it turns to fight alongside.
@@ -274,8 +275,8 @@ describe("seeing the robot: running for help", () => {
     let s = run(seen(), 0.5);
     s = run(markRuin(s, DEFENDER), 0.1);
     expect(mindOf(s, PATROLLER, world).helper).toBe(HUNTER);
-    s = runUntil(s, (x) => x.helpCalls.length > 0);
-    expect(s.helpCalls[0].helper).toBe(HUNTER);
+    s = runUntil(s, (x) => eventsOf(x.events, "helpCalled").length > 0);
+    expect(eventsOf(s.events, "helpCalled")[0].helper).toBe(HUNTER);
     expect(s.alerted).toContain(HUNTER);
   });
 
@@ -283,13 +284,13 @@ describe("seeing the robot: running for help", () => {
     const alone: World = { ...world, targets: [targets[0]] };
     const s = run(state({ pos: { x: 8, y: 5 } }), DT, alone);
     expect(s.alerted).toContain(PATROLLER);
-    expect(s.helpCalls).toEqual([]);
+    expect(eventsOf(s.events, "helpCalled")).toEqual([]);
   });
 
   it("killing it before it gets there means no help comes", () => {
     let s = run(seen(), 1);
     s = run(markRuin(s, PATROLLER), 30);
-    expect(s.helpCalls).toEqual([]);
+    expect(eventsOf(s.events, "helpCalled")).toEqual([]);
     expect(isHidden(s, DEFENDER, world)).toBe(true);
     // A destroyed patroller stays where it fell and does nothing.
     const fell = positionOf(s, PATROLLER, world);
